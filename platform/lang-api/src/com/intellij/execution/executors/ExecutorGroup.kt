@@ -5,6 +5,7 @@ import com.intellij.execution.Executor
 import com.intellij.execution.Executor.shortenNameIfNeeded
 import com.intellij.execution.configurations.RunProfile
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.util.text.TextWithMnemonic
 import org.jetbrains.annotations.ApiStatus
@@ -50,7 +51,7 @@ abstract class ExecutorGroup<Settings : RunExecutorSettings> : Executor() {
     }
   }
 
-  fun childExecutors(): List<Executor> {
+  open fun childExecutors(): List<Executor> {
     return customSettingsLock.read {
       customSettings2Executor.values.toList()
     }
@@ -94,7 +95,7 @@ interface RunExecutorSettings {
    * @see com.intellij.execution.Executor.getStartActionText
    */
   @JvmDefault
-  fun getStartActionText(configurationName: String): String {
+  fun getStartActionText(@NlsSafe configurationName: String): String {
     val configName = if (StringUtil.isEmpty(configurationName)) "" else " '" + shortenNameIfNeeded(configurationName) + "'"
     return TextWithMnemonic.parse(startActionText).append(configName).toString()
   }

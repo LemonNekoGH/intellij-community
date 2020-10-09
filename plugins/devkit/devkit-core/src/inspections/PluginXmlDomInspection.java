@@ -7,6 +7,7 @@ import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ui.ListTable;
 import com.intellij.codeInspection.ui.ListWrappingTableModel;
+import com.intellij.codeInspection.util.InspectionMessage;
 import com.intellij.codeInspection.util.IntentionFamilyName;
 import com.intellij.diagnostic.ITNReporter;
 import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
@@ -27,6 +28,8 @@ import com.intellij.openapi.ui.panel.PanelGridBuilder;
 import com.intellij.openapi.util.BuildNumber;
 import com.intellij.openapi.util.ClearableLazyValue;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.text.HtmlBuilder;
+import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.NavigatableAdapter;
@@ -62,6 +65,7 @@ import org.jetbrains.idea.devkit.DevKitBundle;
 import org.jetbrains.idea.devkit.dom.Action;
 import org.jetbrains.idea.devkit.dom.*;
 import org.jetbrains.idea.devkit.dom.impl.PluginPsiClassConverter;
+import org.jetbrains.idea.devkit.dom.index.ExtensionPointIndex;
 import org.jetbrains.idea.devkit.inspections.quickfix.AddWithTagFix;
 import org.jetbrains.idea.devkit.module.PluginModuleType;
 import org.jetbrains.idea.devkit.util.DescriptorUtil;
@@ -83,6 +87,10 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
 
   @NonNls
   private static final String PLUGIN_ICON_SVG_FILENAME = "pluginIcon.svg";
+
+  @NonNls
+  public static final String DEPENDENCIES_DOC_URL =
+    "https://jetbrains.org/intellij/sdk/docs/basics/plugin_structure/plugin_dependencies.html";
 
   public List<String> myRegistrationCheckIgnoreClassList = new ExternalizableStringSet();
 
@@ -187,11 +195,17 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
       else if (element instanceof Extensions) {
         annotateExtensions((Extensions)element, holder);
       }
+      else if (element instanceof Extensions.UnresolvedExtension) {
+        annotateUnresolvedExtension((Extensions.UnresolvedExtension)element, holder);
+      }
       else if (element instanceof AddToGroup) {
         annotateAddToGroup((AddToGroup)element, holder);
       }
       else if (element instanceof Action) {
         annotateAction((Action)element, holder, componentModuleRegistrationChecker);
+      }
+      else if (element instanceof Synonym) {
+        annotateSynonym((Synonym)element, holder);
       }
       else if (element instanceof Group) {
         annotateGroup((Group)element, holder);
@@ -247,8 +261,9 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
 
     if (!listenerClass.isInheritor(topicClass, true)) {
       holder.createProblem(listener.getListenerClassName(),
-                           "'" + listener.getListenerClassName().getStringValue() + "' does not inherit from " +
-                           "'" + listener.getTopicClassName().getStringValue() + "'");
+                           DevKitBundle.message("inspections.plugin.xml.listener.does.not.inherit",
+                                                listener.getListenerClassName().getStringValue(),
+                                                listener.getTopicClassName().getStringValue()));
     }
   }
 
@@ -264,7 +279,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
 
     if (resolveStatus == PluginPlatformInfo.PlatformResolveStatus.DEVKIT_NO_MAIN) {
       holder.createProblem(listeners, ProblemHighlightType.ERROR,
-                           "Could not locate main plugin.xml file to determine required <idea-version> 'since-build'", null)
+                           DevKitBundle.message("inspections.plugin.xml.since.build.could.not.locate.main.descriptor"), null)
         .highlightWholeElement();
       return;
     }
@@ -272,7 +287,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     if (resolveStatus == PluginPlatformInfo.PlatformResolveStatus.DEVKIT_NO_SINCE_BUILD) {
       final boolean noSinceBuildXml = !DomUtil.hasXml(platformInfo.getMainIdeaPlugin().getIdeaVersion().getSinceBuild());
       holder.createProblem(listeners, ProblemHighlightType.ERROR,
-                           "Must specify <idea-version> 'since-build'", null,
+                           DevKitBundle.message("inspections.plugin.xml.since.build.must.be.specified"), null,
                            noSinceBuildXml ? new AddDomElementQuickFix<>(platformInfo.getMainIdeaPlugin().getIdeaVersion()) : null)
         .highlightWholeElement();
       return;
@@ -281,7 +296,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     final BuildNumber buildNumber = platformInfo.getSinceBuildNumber();
     if (buildNumber == null) {
       holder.createProblem(listeners, ProblemHighlightType.ERROR,
-                           "Could not determine target platform version, please check project setup", null)
+                           DevKitBundle.message("inspections.plugin.xml.since.build.could.not.determine.platform.version"), null)
         .highlightWholeElement();
       return;
     }
@@ -293,9 +308,10 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
       for (Listeners.Listener listener : listeners.getListeners()) {
         if (DomUtil.hasXml(listener.getOs())) {
           holder.createProblem(listener.getOs(), ProblemHighlightType.ERROR,
-                               "Attribute 'os' available in platform version " +
-                               LISTENERS_OS_ATTRIBUTE_PLATFORM_VERSION + " or later only, " +
-                               "but specified 'since-build' platform is '" + baselineVersion + "'", null)
+                               DevKitBundle.message("inspections.plugin.xml.since.build.listeners.os.attribute",
+                                                    LISTENERS_OS_ATTRIBUTE_PLATFORM_VERSION,
+                                                    baselineVersion),
+                               null)
             .highlightWholeElement();
         }
       }
@@ -305,8 +321,10 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     if (baselineVersion >= LISTENERS_PLATFORM_VERSION) return;
 
     holder.createProblem(listeners, ProblemHighlightType.ERROR,
-                         "Feature available in platform version " + LISTENERS_PLATFORM_VERSION + " or later only, " +
-                         "but specified 'since-build' platform is '" + baselineVersion + "'", null)
+                         DevKitBundle.message("inspections.plugin.xml.since.build.listeners.not.available",
+                                              LISTENERS_PLATFORM_VERSION,
+                                              baselineVersion),
+                         null)
       .highlightWholeElement();
   }
 
@@ -330,7 +348,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     //noinspection deprecation
     if (DomUtil.hasXml(ideaPlugin.getUseIdeaClassloader())) {
       //noinspection deprecation
-      highlightDeprecated(ideaPlugin.getUseIdeaClassloader(), "Deprecated", holder, true, true);
+      highlightDeprecated(ideaPlugin.getUseIdeaClassloader(), DevKitBundle.message("inspections.plugin.xml.deprecated"), holder, true, true);
     }
 
     checkMaxLength(ideaPlugin.getUrl(), 255, holder);
@@ -377,14 +395,14 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
         !DomUtil.hasXml(ideaPlugin.getVersion()) &&
         PluginModuleType.isOfType(module)) {
       holder.createProblem(ideaPlugin, DevKitBundle.message("inspections.plugin.xml.version.must.be.specified"),
-                           new AddMissingMainTag("Add <version>", ideaPlugin.getVersion(), ""));
+                           new AddMissingMainTag(DevKitBundle.message("inspections.plugin.xml.add.version.tag"), ideaPlugin.getVersion(), ""));
     }
     checkMaxLength(ideaPlugin.getVersion(), 64, holder);
 
 
     if (isNotIdeaProject && !DomUtil.hasXml(ideaPlugin.getVendor())) {
       holder.createProblem(ideaPlugin, DevKitBundle.message("inspections.plugin.xml.vendor.must.be.specified"),
-                           new AddMissingMainTag("Add <vendor>", ideaPlugin.getVendor(), ""));
+                           new AddMissingMainTag(DevKitBundle.message("inspections.plugin.xml.add.vendor.tag"), ideaPlugin.getVendor(), ""));
     }
   }
 
@@ -401,9 +419,9 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
 
     if (!ideaPlugin.hasRealPluginId()) return;
 
-    String id = ideaPlugin.getId().getStringValue();
+    @NonNls String id = ideaPlugin.getId().getStringValue();
     if (id != null &&
-        (StringUtil.startsWith(id, "com.android.") ||
+        (StringUtil.startsWith(id, "com.android.") || //NON-NLS
          id.equals("org.jetbrains.android"))) {
       return;
     }
@@ -414,7 +432,8 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     if (!DomUtil.hasXml(vendor)) {
       holder.createProblem(DomUtil.getFileElement(ideaPlugin),
                            DevKitBundle.message("inspections.plugin.xml.plugin.should.have.jetbrains.vendor"),
-                           new AddMissingMainTag("Specify JetBrains as vendor", vendor, PluginManagerCore.VENDOR_JETBRAINS));
+                           new AddMissingMainTag(DevKitBundle.message("inspections.plugin.xml.vendor.specify.jetbrains"),
+                                                 vendor, PluginManagerCore.VENDOR_JETBRAINS));
     }
     else if (!PluginManagerCore.VENDOR_JETBRAINS.equals(vendor.getValue())) {
       holder.createProblem(vendor, DevKitBundle.message("inspections.plugin.xml.plugin.should.have.jetbrains.vendor"));
@@ -520,6 +539,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     }
   }
 
+
   private static void checkEpNameAndQualifiedName(ExtensionPoint extensionPoint, DomElementAnnotationHolder holder) {
     GenericAttributeValue<String> name = extensionPoint.getName();
     GenericAttributeValue<String> qualifiedName = extensionPoint.getQualifiedName();
@@ -559,8 +579,9 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     }
     @NonNls String name = nameAttrValue.getValue();
 
-    if (name != null && StringUtil.startsWith(name, "Pythonid.") &&
-        PsiUtil.isIdeaProject(nameAttrValue.getManager().getProject())) {
+    if (name != null
+        && StringUtil.startsWith(name, "Pythonid.") // NON-NLS
+        && PsiUtil.isIdeaProject(nameAttrValue.getManager().getProject())) {
       return true;
     }
 
@@ -605,6 +626,50 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
           }
         });
     }
+  }
+
+  private static void annotateUnresolvedExtension(Extensions.UnresolvedExtension unresolvedExtension, DomElementAnnotationHolder holder) {
+    final Module module = unresolvedExtension.getModule();
+    if (module == null) return;
+
+    final Extensions extensions = unresolvedExtension.getParentOfType(Extensions.class, true);
+    assert extensions != null;
+    String qualifiedExtensionId = extensions.getEpPrefix() + unresolvedExtension.getXmlElementName();
+
+    final ExtensionPoint extensionPoint = ExtensionPointIndex.findExtensionPoint(module, qualifiedExtensionId);
+    if (extensionPoint == null) {
+      String message = new HtmlBuilder()
+        .append(DevKitBundle.message("error.cannot.resolve.extension.point", qualifiedExtensionId))
+        .nbsp()
+        .append(HtmlChunk.link(DEPENDENCIES_DOC_URL, DevKitBundle.message("error.cannot.resolve.plugin.reference.link.title")))
+        .wrapWith(HtmlChunk.html()).toString();
+
+      holder.createProblem(unresolvedExtension, ProblemHighlightType.LIKE_UNKNOWN_SYMBOL, message, null);
+      return;
+    }
+
+
+    final IdeaPlugin ideaPlugin = extensionPoint.getParentOfType(IdeaPlugin.class, true);
+    assert ideaPlugin != null;
+    String dependencyId = ideaPlugin.getPluginId();
+
+    final LocalQuickFix addDependsFix = new LocalQuickFix() {
+      @Override
+      public @IntentionFamilyName @NotNull String getFamilyName() {
+        return DevKitBundle.message("error.cannot.resolve.extension.point.missing.dependency.fix.family.name");
+      }
+
+      @Override
+      public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
+        final IdeaPlugin ideaPlugin = extensions.getParentOfType(IdeaPlugin.class, true);
+        assert ideaPlugin != null;
+        final Dependency dependency = ideaPlugin.addDependency();
+        dependency.setStringValue(dependencyId);
+      }
+    };
+    holder.createProblem(unresolvedExtension,
+                         DevKitBundle.message("error.cannot.resolve.extension.point.missing.dependency", qualifiedExtensionId),
+                         addDependsFix);
   }
 
   private static void annotateIdeaVersion(IdeaVersion ideaVersion, DomElementAnnotationHolder holder) {
@@ -846,8 +911,8 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     GenericAttributeValue<PsiClass> clazz = group.getClazz();
     if (DomUtil.hasXml(clazz) &&
         !DomUtil.hasXml(group.getId())) {
-      holder.createProblem(group, ProblemHighlightType.WARNING, "'id' should be specified", null,
-                           new AddDomElementQuickFix<>(group.getId()));
+      holder.createProblem(group, ProblemHighlightType.WARNING, DevKitBundle.message("inspections.plugin.xml.action.group.id.required"),
+                           null, new AddDomElementQuickFix<>(group.getId()));
     }
 
 
@@ -855,7 +920,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     if (!DomUtil.hasXml(useShortcutOfAttribute)) return;
 
     if (!DomUtil.hasXml(clazz)) {
-      holder.createProblem(group, "'class' must be specified with 'use-shortcut-of'",
+      holder.createProblem(group, DevKitBundle.message("inspections.plugin.xml.action.class.required.with.use.shortcut.of"),
                            new AddDomElementQuickFix<GenericAttributeValue>(group.getClazz()));
       return;
     }
@@ -877,7 +942,9 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
                                                              PsiFormatUtilBase.SHOW_PARAMETERS |
                                                              PsiFormatUtilBase.SHOW_CONTAINING_CLASS,
                                                              PsiFormatUtilBase.SHOW_TYPE);
-      holder.createProblem(clazz, "Must override " + methodPresentation + " with 'use-shortcut-of'");
+      holder.createProblem(clazz,
+                           DevKitBundle.message("inspections.plugin.xml.action.must.override.method.with.use.shortcut.of",
+                                                methodPresentation));
     }
   }
 
@@ -891,6 +958,22 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     Module module = action.getModule();
     if (componentModuleRegistrationChecker.isIdeaPlatformModule(module)) {
       componentModuleRegistrationChecker.checkProperXmlFileForClass(action, action.getClazz().getValue());
+    }
+  }
+
+  private static void annotateSynonym(Synonym synonym, DomElementAnnotationHolder holder) {
+    boolean hasKey = DomUtil.hasXml(synonym.getKey());
+    boolean hasText = DomUtil.hasXml(synonym.getText());
+
+    if (!hasKey && !hasText) {
+      holder.createProblem(synonym, ProblemHighlightType.GENERIC_ERROR,
+                           DevKitBundle.message("inspections.plugin.xml.synonym.missing.key.and.text"), null,
+                           new AddDomElementQuickFix<>(synonym.getKey()),
+                           new AddDomElementQuickFix<>(synonym.getText()));
+    }
+    else if (hasKey && hasText) {
+      holder.createProblem(synonym, ProblemHighlightType.GENERIC_ERROR,
+                           DevKitBundle.message("inspections.plugin.xml.synonym.both.key.and.text"), null);
     }
   }
 
@@ -931,12 +1014,12 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     }
   }
 
-  private static void highlightRedundant(DomElement element, String message, DomElementAnnotationHolder holder) {
+  private static void highlightRedundant(DomElement element, @InspectionMessage String message, DomElementAnnotationHolder holder) {
     highlightRedundant(element, message, ProblemHighlightType.GENERIC_ERROR_OR_WARNING, holder);
   }
 
   private static void highlightRedundant(DomElement element,
-                                         String message,
+                                         @InspectionMessage String message,
                                          ProblemHighlightType highlightType,
                                          DomElementAnnotationHolder holder) {
     holder.createProblem(element, highlightType, message, null, new RemoveDomElementQuickFix(element)).highlightWholeElement();
@@ -950,7 +1033,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
       holder, true, true);
   }
 
-  private static void highlightDeprecated(DomElement element, String message, DomElementAnnotationHolder holder,
+  private static void highlightDeprecated(DomElement element, @InspectionMessage String message, DomElementAnnotationHolder holder,
                                           boolean useRemoveQuickfix, boolean highlightWholeElement) {
     DomElementProblemDescriptor problem;
     if (!useRemoveQuickfix) {
@@ -966,14 +1049,14 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
 
   private static void highlightExperimental(DomElement element, DomElementAnnotationHolder holder) {
     holder.createProblem(element, ProblemHighlightType.WARNING,
-                         "Usage of API marked with @" + ApiStatus.Experimental.class.getCanonicalName() + ". " +
-                         "Such API may be changed or removed in future IDE versions causing compatibility problems.",
+                         DevKitBundle.message("inspections.plugin.xml.usage.of.experimental.api",
+                                              ApiStatus.Experimental.class.getCanonicalName()),
                          null)
       .highlightWholeElement();
   }
 
   private static void checkTemplateText(GenericDomValue<String> domValue,
-                                        String templateText,
+                                        @NonNls String templateText,
                                         DomElementAnnotationHolder holder) {
     if (templateText.equals(domValue.getValue())) {
       holder.createProblem(domValue, DevKitBundle.message("inspections.plugin.xml.do.not.use.template.text", templateText));
@@ -981,7 +1064,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
   }
 
   private static void checkTemplateTextContains(GenericDomValue<String> domValue,
-                                                String containsText,
+                                                @NonNls String containsText,
                                                 DomElementAnnotationHolder holder) {
     String text = domValue.getStringValue();
     if (text != null && StringUtil.containsIgnoreCase(text, containsText)) {
@@ -990,7 +1073,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
   }
 
   private static void checkTemplateTextContainsWord(GenericDomValue<String> domValue,
-                                                    String templateWord,
+                                                    @NonNls String templateWord,
                                                     DomElementAnnotationHolder holder) {
     String text = domValue.getStringValue();
     if (text == null) return;
@@ -1035,14 +1118,14 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     @NotNull
     @Override
     public String getName() {
-      return "Change 'until-build' to '" + myCorrectValue + "'";
+      return DevKitBundle.message("inspections.plugin.xml.change.until.build.name", myCorrectValue);
     }
 
     @Nls
     @NotNull
     @Override
     public String getFamilyName() {
-      return "Correct 'until-build' attribute";
+      return DevKitBundle.message("inspections.plugin.xml.change.until.build.family.name");
     }
 
     @Override
@@ -1056,6 +1139,7 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
 
   private static final class AddMissingMainTag implements LocalQuickFix {
 
+    @IntentionFamilyName
     @NotNull
     private final String myFamilyName;
 
@@ -1065,13 +1149,13 @@ public final class PluginXmlDomInspection extends DevKitPluginXmlInspectionBase 
     @Nullable
     private final String myTagValue;
 
-    private AddMissingMainTag(@NotNull String familyName, @NotNull GenericDomValue domValue, @Nullable String tagValue) {
+    private AddMissingMainTag(@IntentionFamilyName @NotNull String familyName, @NotNull GenericDomValue domValue, @Nullable String tagValue) {
       myFamilyName = familyName;
       myTagName = domValue.getXmlElementName();
       myTagValue = tagValue;
     }
 
-    @Nls
+    @IntentionFamilyName
     @NotNull
     @Override
     public String getFamilyName() {

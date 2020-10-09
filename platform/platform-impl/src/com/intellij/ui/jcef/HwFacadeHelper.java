@@ -42,7 +42,7 @@ public class HwFacadeHelper {
   private ComponentAdapter myTargetListener;
   private VolatileImage myBackBuffer;
 
-  @NotNull Consumer<JBCefBrowser> myOnBrowserMoveResizeCallback =
+  @NotNull Consumer<? super JBCefBrowser> myOnBrowserMoveResizeCallback =
     browser -> {
       if (!isActive()) activateIfNeeded(Collections.singletonList(browser.getCefBrowser()));
     };
@@ -90,7 +90,7 @@ public class HwFacadeHelper {
   }
 
   private static boolean isCefAppActive() {
-    return JCEFAccessor.getCefApp() != null;
+    return JCEFAccessor.getCefApp() != null && !JBCefApp.isOffScreenRenderingMode();
   }
 
   private void onShowing() {
@@ -128,10 +128,12 @@ public class HwFacadeHelper {
 
     Rectangle targetBounds = new Rectangle(myTarget.getLocationOnScreen(), myTarget.getSize());
     boolean overlaps = false;
+    // [tav] todo: still won't work for JCEF component in a popup above another popup, need a smarter and faster way to check z-order
     for (CefBrowser browser : browsers) {
-      Component comp = browser.getUIComponent();
-      if (comp != null && comp.isVisible() && comp.isShowing() &&
-          new Rectangle(comp.getLocationOnScreen(), comp.getSize()).intersects(targetBounds))
+      Component browserComp = browser.getUIComponent();
+      if (browserComp != null && browserComp.isVisible() && browserComp.isShowing() &&
+          !SwingUtilities.isDescendingFrom(browserComp, myTarget) &&
+          new Rectangle(browserComp.getLocationOnScreen(), browserComp.getSize()).intersects(targetBounds))
       {
         overlaps = true;
         break;
@@ -207,7 +209,7 @@ public class HwFacadeHelper {
     }
   }
 
-  public void paint(Graphics g, Consumer<Graphics> targetPaint) {
+  public void paint(Graphics g, Consumer<? super Graphics> targetPaint) {
     if (isActive()) {
       Dimension size = myTarget.getSize();
       if (myBackBuffer == null || myBackBuffer.getWidth() != size.width || myBackBuffer.getHeight() != size.height) {

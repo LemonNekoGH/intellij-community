@@ -20,7 +20,9 @@ import org.jetbrains.annotations.Nls
  */
 interface SdkLookup {
   fun createBuilder(): SdkLookupBuilder
+
   fun lookup(lookup: SdkLookupParameters)
+  fun lookupBlocking(lookup: SdkLookupParameters)
 
   companion object {
     @JvmStatic
@@ -46,7 +48,7 @@ interface SdkLookupBuilder {
   fun withProject(project: Project?): SdkLookupBuilder
 
   @Contract(pure = true)
-  fun withProgressMessageTitle(@Nls message: @ProgressTitle String): SdkLookupBuilder
+  fun withProgressMessageTitle(@ProgressTitle message: String): SdkLookupBuilder
 
   /**
    * Use these SDKs to test first, the [withSdkName] option has a higher priority
@@ -78,9 +80,15 @@ interface SdkLookupBuilder {
   @Contract(pure = true)
   fun onBeforeSdkSuggestionStarted(handler: () -> SdkLookupDecision): SdkLookupBuilder
 
+  /**
+   * Called on each detected SDK local candidate, that matches filters
+   */
   @Contract(pure = true)
   fun onLocalSdkSuggested(handler: (UnknownSdkLocalSdkFix) -> SdkLookupDecision): SdkLookupBuilder
 
+  /**
+   * Called on each detected SDK download candidate, that matches filters
+   */
   @Contract(pure = true)
   fun onDownloadableSdkSuggested(handler: (UnknownSdkDownloadableSdkFix) -> SdkLookupDecision): SdkLookupBuilder
 
@@ -97,7 +105,7 @@ interface SdkLookupBuilder {
    * [withSdkHomeFilter] is not tested for this call!
    */
   @Contract(pure = true)
-  fun onSdkNameResolved(callback: (Sdk?) -> Unit) : SdkLookupBuilder
+  fun onSdkNameResolved(handler: (Sdk?) -> Unit) : SdkLookupBuilder
 
   /**
    * The [Sdk.getSdkType] may not match the proposed sdk type [withSdkType] if the

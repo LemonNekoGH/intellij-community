@@ -20,9 +20,11 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ProjectManagerListener;
 import com.intellij.openapi.ui.popup.Balloon;
+import com.intellij.openapi.ui.popup.ComponentPopupBuilder;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.*;
 import com.intellij.ui.awt.RelativePoint;
@@ -358,17 +360,28 @@ public class HintManagerImpl extends HintManager {
       timer.start();
     }
   }
-
   @Override
   public void showHint(@NotNull final JComponent component, @NotNull RelativePoint p, int flags, int timeout) {
+    showHint(component, p,flags,timeout,null);
+  }
+  @Override
+  public void showHint(@NotNull final JComponent component, @NotNull RelativePoint p, int flags, int timeout, @Nullable Runnable onHintHidden) {
     LOG.assertTrue(SwingUtilities.isEventDispatchThread());
     myHideAlarm.cancelAllRequests();
 
     hideHints(HIDE_BY_OTHER_HINT, false, false);
 
-    final JBPopup popup =
-      JBPopupFactory.getInstance().createComponentPopupBuilder(component, null).setRequestFocus(false).setResizable(false).setMovable(false)
-        .createPopup();
+    ComponentPopupBuilder builder = JBPopupFactory.getInstance().createComponentPopupBuilder(component, null)
+        .setRequestFocus(false)
+        .setResizable(false)
+        .setMovable(false);
+    if(onHintHidden != null)
+        builder.setCancelCallback(()->{
+          onHintHidden.run();
+          return true;
+        });
+
+    final JBPopup popup = builder.createPopup();
     popup.show(p);
 
     ListenerUtil.addMouseListener(component, new MouseAdapter() {
@@ -423,6 +436,10 @@ public class HintManagerImpl extends HintManager {
     }
     else if (externalComponent.getWidth() < p.x + size.width && !hintInfo.isAwtTooltip()) {
       p.x = Math.max(0, externalComponent.getWidth() - size.width);
+    }
+
+    if(hint.isShouldBeReopen()){
+      hint.hide(true);
     }
 
     if (hint.isVisible()) {
@@ -711,7 +728,7 @@ public class HintManagerImpl extends HintManager {
   }
 
   private void showInformationHint(@NotNull Editor editor,
-                                   @NotNull String text,
+                                   @NotNull @NlsContexts.HintText String text,
                                    @Nullable HyperlinkListener listener,
                                    @PositionFlags short position) {
     JComponent label = HintUtil.createInformationLabel(text, listener, null, null);

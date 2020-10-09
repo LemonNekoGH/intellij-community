@@ -6,8 +6,12 @@ import com.intellij.workspaceModel.storage.entities.*
 import com.intellij.workspaceModel.storage.impl.WorkspaceEntityStorageBuilderImpl
 import com.intellij.workspaceModel.storage.impl.WorkspaceEntityStorageImpl
 import com.intellij.workspaceModel.storage.impl.exceptions.AddDiffException
+import com.intellij.workspaceModel.storage.impl.external.ExternalEntityMappingImpl
+import org.hamcrest.CoreMatchers
 import org.junit.Assert.*
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.ExpectedException
 
 private fun WorkspaceEntityStorageBuilder.applyDiff(anotherBuilder: WorkspaceEntityStorageBuilder): WorkspaceEntityStorage {
   val builder = WorkspaceEntityStorageBuilderImpl.from(this)
@@ -18,6 +22,10 @@ private fun WorkspaceEntityStorageBuilder.applyDiff(anotherBuilder: WorkspaceEnt
 }
 
 class DiffBuilderTest {
+  @JvmField
+  @Rule
+  val expectedException = ExpectedException.none()
+
   @Test
   fun `add entity`() {
     val source = WorkspaceEntityStorageBuilderImpl.create()
@@ -235,8 +243,10 @@ class DiffBuilderTest {
     source.applyDiff(target)
   }
 
-  @Test(expected = AddDiffException::class)
+  @Test
   fun `adding duplicated persistent ids`() {
+    expectedException.expectCause(CoreMatchers.isA(AddDiffException::class.java))
+
     val source = WorkspaceEntityStorageBuilderImpl.create()
     val target = WorkspaceEntityStorageBuilderImpl.from(source)
 
@@ -246,8 +256,10 @@ class DiffBuilderTest {
     source.applyDiff(target)
   }
 
-  @Test(expected = AddDiffException::class)
+  @Test
   fun `modifying duplicated persistent ids`() {
+    expectedException.expectCause(CoreMatchers.isA(AddDiffException::class.java))
+
     val source = WorkspaceEntityStorageBuilderImpl.create()
     val namedEntity = source.addNamedEntity("Hello")
     val target = WorkspaceEntityStorageBuilderImpl.from(source)
@@ -258,5 +270,61 @@ class DiffBuilderTest {
     }
 
     source.applyDiff(target)
+  }
+
+  @Test
+  fun `checking external mapping`() {
+    val target = WorkspaceEntityStorageBuilderImpl.create()
+
+    target.addSampleEntity("Entity at index 0")
+
+    val source = WorkspaceEntityStorageBuilderImpl.create()
+    val sourceSample = source.addSampleEntity("Entity at index 1")
+    val mutableExternalMapping = source.getMutableExternalMapping<Any>("Ext")
+    val anyObj = Any()
+    mutableExternalMapping.addMapping(sourceSample, anyObj)
+
+    target.addDiff(source)
+
+    val externalMapping = target.getExternalMapping<Any>("Ext") as ExternalEntityMappingImpl<Any>
+    assertEquals(1, externalMapping.index.size)
+  }
+
+  @Test
+  fun `change source in diff`() {
+    val target = WorkspaceEntityStorageBuilderImpl.create()
+    val sampleEntity = target.addSampleEntity("Prop", MySource)
+
+    val source = WorkspaceEntityStorageBuilder.from(target)
+    source.changeSource(sampleEntity, AnotherSource)
+
+    target.addDiff(source)
+
+    target.assertConsistency()
+
+    val entitySourceIndex = target.indexes.entitySourceIndex
+    assertEquals(1, entitySourceIndex.index.size)
+    assertNotNull(entitySourceIndex.getIdsByEntry(AnotherSource)?.single())
+  }
+
+  @Test
+  fun `change source in target`() {
+    val target = WorkspaceEntityStorageBuilderImpl.create()
+    val sampleEntity = target.addSampleEntity("Prop", MySource)
+
+    val source = WorkspaceEntityStorageBuilder.from(target)
+    target.changeSource(sampleEntity, AnotherSource)
+
+    source.modifyEntity(ModifiableSampleEntity::class.java, sampleEntity) {
+      this.stringProperty = "Updated"
+    }
+
+    target.addDiff(source)
+
+    target.assertConsistency()
+
+    val entitySourceIndex = target.indexes.entitySourceIndex
+    assertEquals(1, entitySourceIndex.index.size)
+    assertNotNull(entitySourceIndex.getIdsByEntry(AnotherSource)?.single())
   }
 }

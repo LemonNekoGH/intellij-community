@@ -7,8 +7,10 @@ import com.intellij.ide.util.gotoByName.GotoSymbolModel2;
 import com.intellij.ide.util.gotoByName.LanguageRef;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.ui.IdeUICustomization;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
@@ -31,6 +33,7 @@ public class SymbolSearchEverywhereContributor extends AbstractGotoSEContributor
   }
 
   @NotNull
+  @NlsContexts.Checkbox
   public String includeNonProjectItemsText() {
     return IdeUICustomization.getInstance().projectMessage("checkbox.include.non.project.symbols");
   }
@@ -48,6 +51,11 @@ public class SymbolSearchEverywhereContributor extends AbstractGotoSEContributor
       model.setFilterItems(myFilter.getSelectedElements());
     }
     return model;
+  }
+
+  @Override
+  protected @Nullable SearchEverywhereCommandInfo getFilterCommand() {
+    return new SearchEverywhereCommandInfo("s", IdeBundle.message("search.everywhere.filter.symbols.description"), this);
   }
 
   @NotNull

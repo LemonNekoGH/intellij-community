@@ -31,8 +31,11 @@ import com.intellij.util.diff.DiffTreeChangeBuilder;
 import com.intellij.util.diff.FlyweightCapableTreeStructure;
 import com.intellij.util.diff.ShallowNodeComparator;
 import com.intellij.util.text.CharArrayUtil;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -82,7 +85,7 @@ public class PsiBuilderImpl extends UnprotectedUserDataHolder implements PsiBuil
 
   private IElementType myCachedTokenType;
 
-  private final Int2ObjectOpenHashMap<LazyParseableToken> myChameleonCache = new Int2ObjectOpenHashMap<>();
+  private final Int2ObjectMap<LazyParseableToken> myChameleonCache = new Int2ObjectOpenHashMap<>();
   private final MarkerPool myPool = new MarkerPool(this);
   private final MarkerOptionalData myOptionalData = new MarkerOptionalData();
   private final MarkerProduction myProduction = new MarkerProduction(myPool, myOptionalData);
@@ -368,7 +371,7 @@ public class PsiBuilderImpl extends UnprotectedUserDataHolder implements PsiBuil
     }
 
     @Override
-    public void doneBefore(@NotNull final IElementType type, @NotNull final Marker before, @NotNull final String errorMessage) {
+    public void doneBefore(@NotNull final IElementType type, @NotNull final Marker before, @NotNull @Nls String errorMessage) {
       StartMarker marker = (StartMarker)before;
       ErrorItem errorItem = myBuilder.myPool.allocateErrorItem();
       errorItem.myMessage = errorMessage;
@@ -378,13 +381,13 @@ public class PsiBuilderImpl extends UnprotectedUserDataHolder implements PsiBuil
     }
 
     @Override
-    public void error(@NotNull String message) {
+    public void error(@NotNull @Nls String message) {
       myType = TokenType.ERROR_ELEMENT;
       myBuilder.processDone(this, message, null);
     }
 
     @Override
-    public void errorBefore(@NotNull final String message, @NotNull final Marker before) {
+    public void errorBefore(@NotNull @Nls String message, @NotNull Marker before) {
       myType = TokenType.ERROR_ELEMENT;
       myBuilder.processDone(this, message, (StartMarker)before);
     }
@@ -598,7 +601,7 @@ public class PsiBuilderImpl extends UnprotectedUserDataHolder implements PsiBuil
   }
 
   static class ErrorItem extends ProductionMarker {
-    private String myMessage;
+    private @NlsContexts.DetailedDescription String myMessage;
 
     ErrorItem(int markerId, PsiBuilderImpl builder) {
       super(markerId, builder);
@@ -835,7 +838,7 @@ public class PsiBuilderImpl extends UnprotectedUserDataHolder implements PsiBuil
     return myProduction.hasErrorsAfter((StartMarker)marker);
   }
 
-  private void processDone(@NotNull StartMarker marker, @Nullable String errorMessage, @Nullable StartMarker before) {
+  private void processDone(@NotNull StartMarker marker, @Nullable @Nls String errorMessage, @Nullable StartMarker before) {
     doValidityChecks(marker, before);
 
     if (errorMessage != null) {
@@ -966,7 +969,7 @@ public class PsiBuilderImpl extends UnprotectedUserDataHolder implements PsiBuil
     }
   }
 
-  private static final String UNBALANCED_MESSAGE =
+  private static final @NonNls String UNBALANCED_MESSAGE =
     "Unbalanced tree. Most probably caused by unbalanced markers. " +
     "Try calling setDebugMode(true) against PsiBuilder passed to identify exact location of the problem";
 
@@ -1280,7 +1283,8 @@ public class PsiBuilderImpl extends UnprotectedUserDataHolder implements PsiBuil
     final IElementType type = marker.myType;
     if (type == TokenType.ERROR_ELEMENT) {
       String error = marker.myBuilder.myOptionalData.getDoneError(marker.markerId);
-      return Factory.createErrorElement(Objects.requireNonNull(error));
+      Objects.requireNonNull(error);
+      return Factory.createErrorElement(error);
     }
 
     if (type == null) {
@@ -1304,7 +1308,7 @@ public class PsiBuilderImpl extends UnprotectedUserDataHolder implements PsiBuil
   }
 
   @Nullable
-  public static String getErrorMessage(@NotNull LighterASTNode node) {
+  public static @NlsContexts.DetailedDescription String getErrorMessage(@NotNull LighterASTNode node) {
     if (node instanceof ErrorItem) return ((ErrorItem)node).myMessage;
     if (node instanceof StartMarker) {
       final StartMarker marker = (StartMarker)node;

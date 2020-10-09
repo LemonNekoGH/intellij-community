@@ -31,9 +31,7 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.projectRoots.JavaSdk;
-import com.intellij.openapi.projectRoots.ProjectJdkTable;
-import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.projectRoots.*;
 import com.intellij.openapi.projectRoots.impl.JavaAwareProjectJdkTableImpl;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectRootManager;
@@ -106,7 +104,6 @@ import static icons.ExternalSystemIcons.Task;
 public class MavenUtil {
   @ApiStatus.Experimental
   @NonNls public static final String MAVEN_NAME = "Maven";
-  @NonNls public static final String MAVEN_NAME_PRESENTABLE = MAVEN_NAME;
   @NonNls public static final String MAVEN_NAME_UPCASE = MAVEN_NAME.toUpperCase();
   public static final ProjectSystemId SYSTEM_ID = new ProjectSystemId(MAVEN_NAME_UPCASE);
   public static final String MAVEN_NOTIFICATION_GROUP = MAVEN_NAME;
@@ -199,7 +196,15 @@ public class MavenUtil {
   }
 
   public static void invokeAndWaitWriteAction(@NotNull Project p, @NotNull Runnable r) {
-    invokeAndWait(p, () -> ApplicationManager.getApplication().runWriteAction(r));
+    if(ApplicationManager.getApplication().isWriteAccessAllowed()) {
+      r.run();
+    } else if( ApplicationManager.getApplication().isDispatchThread()){
+      ApplicationManager.getApplication().runWriteAction(r);
+    } else {
+      ApplicationManager.getApplication().invokeAndWait(DisposeAwareRunnable.create(
+        ()->ApplicationManager.getApplication().runWriteAction(r), p),
+                                                        ModalityState.defaultModalityState());
+    }
   }
 
   public static void runDumbAware(@NotNull Project project, @NotNull Runnable r) {
@@ -237,7 +242,7 @@ public class MavenUtil {
     return LaterInvocator.isInModalContext();
   }
 
-  public static void showError(Project project, String title, Throwable e) {
+  public static void showError(Project project, @NlsContexts.NotificationTitle String title, Throwable e) {
     MavenLog.LOG.warn(title, e);
     Notifications.Bus.notify(new Notification(MAVEN_NOTIFICATION_GROUP, title, e.getMessage(), NotificationType.ERROR), project);
   }
@@ -341,6 +346,7 @@ public class MavenUtil {
     properties.setProperty("GROUP_ID", projectId.getGroupId());
     properties.setProperty("ARTIFACT_ID", projectId.getArtifactId());
     properties.setProperty("VERSION", projectId.getVersion());
+
     if (parentId != null) {
       conditions.setProperty("HAS_PARENT", "true");
       properties.setProperty("PARENT_GROUP_ID", parentId.getGroupId());
@@ -359,6 +365,18 @@ public class MavenUtil {
             properties.setProperty("PARENT_RELATIVE_PATH", relativePath);
           }
         }
+      }
+    } else {
+      //set language level only for root pom
+      Sdk sdk = ProjectRootManager.getInstance(project).getProjectSdk();
+      if (sdk != null && sdk.getSdkType() instanceof JavaSdk) {
+        JavaSdk javaSdk = (JavaSdk)sdk.getSdkType();
+        JavaSdkVersion version = javaSdk.getVersion(sdk);
+        String description = version == null ? null : version.getDescription();
+        boolean shouldSetLangLevel = version != null && version.isAtLeast(JavaSdkVersion.JDK_1_6);
+        conditions.setProperty("SHOULD_SET_LANG_LEVEL", String.valueOf(shouldSetLangLevel));
+        properties.setProperty("COMPILER_LEVEL_SOURCE", description);
+        properties.setProperty("COMPILER_LEVEL_TARGET", description);
       }
     }
     runOrApplyFileTemplate(project, file, MavenFileTemplateGroupFactory.MAVEN_PROJECT_XML_TEMPLATE, properties, conditions, interactive);
@@ -442,7 +460,7 @@ public class MavenUtil {
     return true;
   }
 
-  public static void run(Project project, String title, final MavenTask task)
+  public static void run(Project project, @NlsContexts.DialogTitle String title, final MavenTask task)
     throws MavenProcessCanceledException {
     final Exception[] canceledEx = new Exception[1];
     final RuntimeException[] runtimeEx = new RuntimeException[1];
@@ -475,7 +493,7 @@ public class MavenUtil {
 
   @NotNull
   public static MavenTaskHandler runInBackground(@NotNull final Project project,
-                                                 @NotNull final String title,
+                                                 @NotNull @NlsContexts.Command final String title,
                                                  final boolean cancellable,
                                                  @NotNull final MavenTask task) {
     return runInBackground(project, title, cancellable, task, null);
@@ -484,7 +502,7 @@ public class MavenUtil {
 
   @NotNull
   public static MavenTaskHandler runInBackground(@NotNull final Project project,
-                                                 @NotNull final String title,
+                                                 @NotNull @NlsContexts.Command final String title,
                                                  final boolean cancellable,
                                                  @NotNull final MavenTask task,
                                                  @Nullable("null means application pooled thread")
@@ -1299,7 +1317,7 @@ public class MavenUtil {
 
     if (name.equals(MavenRunnerSettings.USE_PROJECT_JDK)) {
         Sdk res = ProjectRootManager.getInstance(project).getProjectSdk();
-        if (res != null) {
+        if (res != null && res.getSdkType() instanceof JavaSdkType) {
           return res;
         }
       throw new ProjectJdkNotFoundException();
@@ -1315,7 +1333,12 @@ public class MavenUtil {
 
     for (Sdk projectJdk : ProjectJdkTable.getInstance().getAllJdks()) {
       if (projectJdk.getName().equals(name)) {
-        return projectJdk;
+        if(projectJdk.getSdkType() instanceof JavaSdkType) {
+          return projectJdk;
+        } else {
+          throw new InvalidSdkException(projectJdk.getName());
+        }
+
       }
     }
     throw new InvalidSdkException(name);

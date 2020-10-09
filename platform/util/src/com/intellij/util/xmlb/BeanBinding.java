@@ -23,11 +23,10 @@ import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Type;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 @ApiStatus.Internal
 public class BeanBinding extends NotNullDeserializeBinding {
-  private static final XmlSerializerPropertyCollector PROPERTY_COLLECTOR = new XmlSerializerPropertyCollector();
+  private static final XmlSerializerPropertyCollector PROPERTY_COLLECTOR = new XmlSerializerPropertyCollector(new MyPropertyCollectorConfiguration());
 
   private final String myTagName;
   @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized")
@@ -43,6 +42,21 @@ public class BeanBinding extends NotNullDeserializeBinding {
     myBeanClass = beanClass;
     myTagName = getTagName(beanClass);
     assert !StringUtil.isEmptyOrSpaces(myTagName) : "Bean name is empty: " + beanClass;
+  }
+
+  private static final class XmlSerializerPropertyCollector extends PropertyCollector {
+    private final ClassValue<List<MutableAccessor>> accessorCache;
+
+    XmlSerializerPropertyCollector(@NotNull PropertyCollector.Configuration configuration) {
+      super(configuration);
+
+      accessorCache = new XmlSerializerPropertyCollectorListClassValue(configuration);
+    }
+
+    @Override
+    public @NotNull List<MutableAccessor> collect(@NotNull Class<?> aClass) {
+      return accessorCache.get(aClass);
+    }
   }
 
   @SuppressWarnings("NonPrivateFieldAccessedInSynchronizedContext")
@@ -290,58 +304,31 @@ public class BeanBinding extends NotNullDeserializeBinding {
     return false;
   }
 
-  private static final class XmlSerializerPropertyCollector extends PropertyCollector {
-    private final Map<Class<?>, List<MutableAccessor>> accessorCache = new ConcurrentHashMap<>();
+  private static final class XmlSerializerPropertyCollectorListClassValue extends ClassValue<List<MutableAccessor>> {
+    private final @NotNull PropertyCollector.Configuration configuration;
 
-    XmlSerializerPropertyCollector() {
-      super(PropertyCollector.COLLECT_ACCESSORS);
+    private XmlSerializerPropertyCollectorListClassValue(@NotNull PropertyCollector.Configuration configuration) {
+      this.configuration = configuration;
     }
 
     @Override
-    public @NotNull List<MutableAccessor> collect(@NotNull Class<?> aClass) {
-      return accessorCache.computeIfAbsent(aClass, aClass1 -> {
-        List<MutableAccessor> result = super.collect(aClass1);
-        if (result.isEmpty() && !isAssertBindings(aClass)) {
-          //noinspection deprecation
-          if (JDOMExternalizable.class.isAssignableFrom(aClass)) {
-            LOG.error("Do not compute bindings for JDOMExternalizable: " + aClass.getName());
-          }
-          else if (aClass.isEnum()) {
-            LOG.error("Do not compute bindings for enum: " + aClass.getName());
-          }
-          else if (aClass == String.class) {
-            LOG.error("Do not compute bindings for String");
-          }
-          LOG.warn("no accessors for " + aClass.getName());
+    protected List<MutableAccessor> computeValue(Class<?> aClass) {
+      // do not pass classToOwnFields cache - no need because we collect the whole set of accessors
+      List<MutableAccessor> result = PropertyCollector.doCollect(aClass, configuration, null);
+      if (result.isEmpty() && !isAssertBindings(aClass)) {
+        //noinspection deprecation
+        if (JDOMExternalizable.class.isAssignableFrom(aClass)) {
+          LOG.error("Do not compute bindings for JDOMExternalizable: " + aClass.getName());
         }
-        return result;
-      });
-    }
-
-    @Override
-    protected boolean isAnnotatedAsTransient(@NotNull AnnotatedElement element) {
-      return element.isAnnotationPresent(Transient.class);
-    }
-
-    @Override
-    protected boolean hasStoreAnnotations(@NotNull AccessibleObject element) {
-      //noinspection deprecation
-      return element.isAnnotationPresent(OptionTag.class) ||
-             element.isAnnotationPresent(Tag.class) ||
-             element.isAnnotationPresent(Attribute.class) ||
-             element.isAnnotationPresent(Property.class) ||
-             element.isAnnotationPresent(Text.class) ||
-             element.isAnnotationPresent(CollectionBean.class) ||
-             element.isAnnotationPresent(MapAnnotation.class) ||
-             element.isAnnotationPresent(XMap.class) ||
-             element.isAnnotationPresent(XCollection.class) ||
-             element.isAnnotationPresent(AbstractCollection.class);
-    }
-
-    @Override
-    public void clearSerializationCaches() {
-      super.clearSerializationCaches();
-      accessorCache.clear();
+        else if (aClass.isEnum()) {
+          LOG.error("Do not compute bindings for enum: " + aClass.getName());
+        }
+        else if (aClass == String.class) {
+          LOG.error("Do not compute bindings for String");
+        }
+        LOG.warn("no accessors for " + aClass.getName());
+      }
+      return result;
     }
   }
 
@@ -415,7 +402,30 @@ public class BeanBinding extends NotNullDeserializeBinding {
     return new OptionTagBinding(accessor, optionTag);
   }
 
-  public static void clearSerializationCaches() {
-    PROPERTY_COLLECTOR.clearSerializationCaches();
+  // must be static class and not anonymous
+  private static final class MyPropertyCollectorConfiguration extends PropertyCollector.Configuration {
+    private MyPropertyCollectorConfiguration() {
+      super(true, false, false);
+    }
+
+    @Override
+    public boolean isAnnotatedAsTransient(@NotNull AnnotatedElement element) {
+      return element.isAnnotationPresent(Transient.class);
+    }
+
+    @Override
+    public boolean hasStoreAnnotations(@NotNull AccessibleObject element) {
+      //noinspection deprecation
+      return element.isAnnotationPresent(OptionTag.class) ||
+             element.isAnnotationPresent(Tag.class) ||
+             element.isAnnotationPresent(Attribute.class) ||
+             element.isAnnotationPresent(Property.class) ||
+             element.isAnnotationPresent(Text.class) ||
+             element.isAnnotationPresent(CollectionBean.class) ||
+             element.isAnnotationPresent(MapAnnotation.class) ||
+             element.isAnnotationPresent(XMap.class) ||
+             element.isAnnotationPresent(XCollection.class) ||
+             element.isAnnotationPresent(AbstractCollection.class);
+    }
   }
 }

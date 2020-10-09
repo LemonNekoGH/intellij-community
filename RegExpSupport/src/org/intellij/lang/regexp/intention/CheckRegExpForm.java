@@ -42,11 +42,13 @@ import com.intellij.util.SmartList;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.intellij.lang.regexp.*;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -54,7 +56,7 @@ import java.util.regex.Pattern;
 /**
  * @author Konstantin Bulenkov
  */
-public class CheckRegExpForm {
+public final class CheckRegExpForm {
   private static final Logger LOG = Logger.getInstance(CheckRegExpForm.class);
 
   public static final Key<Boolean> CHECK_REG_EXP_EDITOR = Key.create("CHECK_REG_EXP_EDITOR");
@@ -69,7 +71,7 @@ public class CheckRegExpForm {
   private final JBLabel myRegExpIcon = new JBLabel();
   private final JBLabel mySampleIcon = new JBLabel();
 
-  private final SmartList<RangeHighlighter> highlighters = new SmartList<>();
+  private final List<RangeHighlighter> highlighters = new ArrayList<>();
 
   public CheckRegExpForm(@NotNull PsiFile regexpFile) {
     final Project project = regexpFile.getProject();
@@ -82,7 +84,7 @@ public class CheckRegExpForm {
     }
     else {
       // for correct syntax highlighting
-      fileType = new RegExpFileType(language);
+      fileType = RegExpFileType.forLanguage(language);
     }
     final EditorTextField myRegExp = new EditorTextField(document, project, fileType, false, false) {
       @Override
@@ -101,7 +103,8 @@ public class CheckRegExpForm {
     };
     setupIcon(myRegExp, myRegExpIcon);
 
-    final String sampleText = PropertiesComponent.getInstance(project).getValue(LAST_EDITED_REGEXP, "Sample Text");
+    final String sampleText = PropertiesComponent.getInstance(project).getValue(LAST_EDITED_REGEXP,
+                                                                                RegExpBundle.message("checker.sample.text"));
     mySampleText = new EditorTextField(sampleText, project, PlainTextFileType.INSTANCE) {
       @Override
       protected EditorEx createEditor() {
@@ -284,13 +287,23 @@ public class CheckRegExpForm {
     return myRootPanel;
   }
 
-  private List<RegExpMatch> getMatches(PsiFile regexpFile) {
+  @ApiStatus.Internal
+  public static List<RegExpMatch> getMatches(@NotNull PsiFile regexpFile) {
     return regexpFile.getUserData(LAST_MATCHES);
+  }
+
+  public static void setMatches(@NotNull PsiFile regexpFile, @NotNull List<RegExpMatch> matches) {
+    regexpFile.putUserData(LAST_MATCHES, matches);
   }
 
   @TestOnly
   public static boolean isMatchingTextTest(@NotNull PsiFile regexpFile, @NotNull String sampleText) {
-    return isMatchingText(regexpFile, regexpFile.getText(), sampleText) == RegExpMatchResult.MATCHES;
+    return getMatchResult(regexpFile, sampleText) == RegExpMatchResult.MATCHES;
+  }
+
+  @TestOnly
+  public static RegExpMatchResult getMatchResult(@NotNull PsiFile regexpFile, @NotNull String sampleText) {
+    return isMatchingText(regexpFile, regexpFile.getText(), sampleText);
   }
 
   static RegExpMatchResult isMatchingText(@NotNull final PsiFile regexpFile, String regexpText, @NotNull String sampleText) {
@@ -340,7 +353,7 @@ public class CheckRegExpForm {
           }
           matches.add(match);
         } while (matcher.find());
-        regexpFile.putUserData(LAST_MATCHES, matches);
+        setMatches(regexpFile, matches);
         return RegExpMatchResult.FOUND;
       }
       else {

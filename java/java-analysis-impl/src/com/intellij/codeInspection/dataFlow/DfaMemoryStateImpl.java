@@ -1183,12 +1183,16 @@ public class DfaMemoryStateImpl implements DfaMemoryState {
     } else {
       myVariableTypes.put(dfaVar, type);
     }
+    if (type instanceof DfEphemeralReferenceType) {
+      markEphemeral();
+    }
     myCachedHash = null;
   }
 
   protected void updateEquivalentVariables(DfaVariableValue dfaVar, DfType type) {
     EqClass eqClass = getEqClass(dfaVar);
     if (eqClass != null) {
+      type = sanitizeNullability(type);
       for (DfaVariableValue value : eqClass.asList()) {
         if (value != dfaVar) {
           recordVariableType(value, type);
@@ -1570,7 +1574,7 @@ public class DfaMemoryStateImpl implements DfaMemoryState {
     @Override
     public String toString() {
       final StringBuilder s = new StringBuilder("{");
-      forEachEntry(new TIntObjectProcedure<Integer>() {
+      forEachEntry(new TIntObjectProcedure<>() {
         @Override
         public boolean execute(int id, Integer index) {
           DfaValue value = myFactory.getValue(id);

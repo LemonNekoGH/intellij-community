@@ -12,6 +12,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.project.ProjectManagerListener
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.wm.impl.customFrameDecorations.header.title.CustomHeaderTitle
 import com.intellij.ui.awt.RelativeRectangle
 import com.intellij.util.ui.JBUI.CurrentTheme.CustomFrameDecorations
 import java.awt.Rectangle
@@ -20,7 +21,13 @@ import java.util.*
 import javax.swing.JComponent
 import javax.swing.JFrame
 
-class CustomDecorationPath(val frame: JFrame, onBoundsChanged: () -> Unit) : SelectedEditorFilePath(onBoundsChanged) {
+class CustomDecorationPath(val frame: JFrame) : SelectedEditorFilePath(), CustomHeaderTitle {
+  companion object{
+    fun createInstance(frame: JFrame): CustomDecorationPath {
+      return CustomDecorationPath(frame)
+    }
+  }
+
   private val projectManagerListener = object : ProjectManagerListener {
     override fun projectOpened(project: Project) {
       checkOpenedProjects()
@@ -32,12 +39,19 @@ class CustomDecorationPath(val frame: JFrame, onBoundsChanged: () -> Unit) : Sel
   }
 
   private fun checkOpenedProjects() {
-    val instance = ProjectManager.getInstance()
-    project?.let { pr ->
-      val recentProjectManager = RecentProjectsManager.getInstance() as RecentProjectsManagerBase
-      val recentSame = LinkedHashSet(recentProjectManager.getRecentPaths()).any { recentProjectManager.getProjectName(it) == pr.name && pr.basePath != it}
-      multipleSameNamed = instance.openProjects.any { it != pr && it.name == pr.name } || recentSame
+    val currentProject = project ?: return
+    val manager = RecentProjectsManager.getInstance() as RecentProjectsManagerBase
+    val currentPath = manager.getProjectPath(currentProject) ?: return
+    val currentName = manager.getProjectName(currentPath)
+    val sameNameInRecent = manager.getRecentPaths().any {
+      currentPath != it && currentName == manager.getProjectName(it)
     }
+    val sameNameInOpen = ProjectManager.getInstance().openProjects.any {
+      val path = manager.getProjectPath(it) ?: return@any false
+      val name = manager.getProjectName(path)
+      currentPath != path && currentName == name
+    }
+    multipleSameNamed = sameNameInRecent || sameNameInOpen
   }
 
   private val titleChangeListener = PropertyChangeListener{
@@ -51,13 +65,13 @@ class CustomDecorationPath(val frame: JFrame, onBoundsChanged: () -> Unit) : Sel
     return null
   }
 
-  fun setActive(value: Boolean) {
+  override fun setActive(value: Boolean) {
     val color = if (value) CustomFrameDecorations.titlePaneInfoForeground() else CustomFrameDecorations.titlePaneInactiveInfoForeground()
 
-    getView().foreground = color
+    view.foreground = color
   }
 
-  fun getListenerBounds(): List<RelativeRectangle> {
+  override fun getBoundList(): List<RelativeRectangle> {
     return if (!toolTipNeeded) {
       emptyList()
     }

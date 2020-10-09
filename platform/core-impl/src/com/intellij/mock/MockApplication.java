@@ -109,6 +109,10 @@ public class MockApplication extends MockComponentManager implements Application
   }
 
   @Override
+  public void assertIsNonDispatchThread() {
+  }
+
+  @Override
   public void assertIsWriteThread() {
   }
 
@@ -324,7 +328,7 @@ public class MockApplication extends MockComponentManager implements Application
   }
 
   @Override
-  public void load(@Nullable Path path) {
+  public void load() {
   }
 
   @Override

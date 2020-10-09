@@ -18,6 +18,7 @@
 
     <applicationService serviceImplementation="org.jetbrains.plugins.terminal.TerminalOptionsProvider"/>
     <projectService serviceImplementation="org.jetbrains.plugins.terminal.TerminalProjectOptionsProvider"/>
+    <projectService serviceImplementation="org.jetbrains.plugins.terminal.TerminalProjectOptionsProviderOld"/>
 
     <projectService serviceImplementation="org.jetbrains.plugins.terminal.arrangement.TerminalArrangementManager"/>
     <statistics.counterUsagesCollector groupId="terminalShell" version="3"/>
@@ -28,7 +29,7 @@
     <terminal.shellCommandHandler implementation="com.intellij.diff.actions.DiffCustomCommandHandler"/>
     <experimentalFeature id="terminal.shell.command.handling" percentOfUsers="100"/>
     <terminal.shellCommandHandler implementation="com.intellij.ide.actions.runAnything.RunAnythingTerminalBridge"/>
-    <notificationAllowlist groupIds="Terminal"/>
+    <notificationGroup id="Terminal" displayType="TOOL_WINDOW" toolWindowId="Terminal"/>
     <terminal.shellCommandHandler implementation="com.intellij.terminal.impl.OpenFileShellCommandHandler"/>
   </extensions>
 

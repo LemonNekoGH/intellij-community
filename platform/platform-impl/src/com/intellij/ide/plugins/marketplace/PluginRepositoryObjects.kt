@@ -4,6 +4,7 @@ package com.intellij.ide.plugins.marketplace
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.intellij.ide.plugins.PluginNode
+import com.intellij.ide.plugins.RepositoryHelper
 import com.intellij.ide.plugins.newui.Tags
 
 /**
@@ -36,6 +37,7 @@ data class IntellijUpdateMetadata(
   val version: String = "",
   val notes: String = "",
   val dependencies: Set<String> = emptySet(),
+  val optionalDependencies: Set<String> = emptySet(),
   val since: String? = null,
   val until: String? = null,
   val productCode: String? = null,
@@ -57,13 +59,14 @@ data class IntellijUpdateMetadata(
     pluginNode.url = url
     pluginNode.size = size.toString()
     for (dep in dependencies) {
-      if (dep.startsWith("(optional)")) {
-        pluginNode.addDepends(dep.removePrefix("(optional)").trim(), true)
-      }
-      else {
-        pluginNode.addDepends(dep, false)
-      }
+      pluginNode.addDepends(dep, false)
     }
+    for (dep in optionalDependencies) {
+      pluginNode.addDepends(dep, true)
+    }
+
+    RepositoryHelper.addMarketplacePluginDependencyIfRequired(pluginNode)
+
     return pluginNode
   }
 }
@@ -75,6 +78,7 @@ internal class MarketplaceSearchPluginData(
   var isPaid: Boolean = false,
   val rating: Double = 0.0,
   val name: String = "",
+  val cdate: Long? = null,
   val vendor: String = "",
   @get:JsonProperty("updateId")
   val externalUpdateId: String? = null,
@@ -91,6 +95,7 @@ internal class MarketplaceSearchPluginData(
     pluginNode.vendor = vendor
     pluginNode.externalPluginId = externalPluginId
     pluginNode.externalUpdateId = externalUpdateId
+    if (cdate != null) pluginNode.date = cdate
     if (isPaid) pluginNode.tags = listOf(Tags.Paid.name)
     return pluginNode
   }

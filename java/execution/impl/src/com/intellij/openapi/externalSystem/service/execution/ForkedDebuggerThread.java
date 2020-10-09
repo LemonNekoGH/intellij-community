@@ -11,6 +11,7 @@ import com.intellij.debugger.jdi.VirtualMachineProxyImpl;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.ProgramRunnerUtil;
 import com.intellij.execution.RunnerAndConfigurationSettings;
+import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.impl.ConsoleViewImpl;
 import com.intellij.execution.impl.EditorHyperlinkSupport;
@@ -33,7 +34,9 @@ import com.intellij.openapi.externalSystem.debugger.DebuggerBackendExtension;
 import com.intellij.openapi.externalSystem.rt.execution.ForkedDebuggerHelper;
 import com.intellij.openapi.externalSystem.util.ExternalSystemBundle;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.io.StreamUtil;
+import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.content.Content;
@@ -48,6 +51,8 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+
+import static com.intellij.openapi.externalSystem.debugger.DebuggerBackendExtension.RUNTIME_MODULE_DIR_KEY;
 
 /**
  * @author Vladislav.Soroka
@@ -190,14 +195,17 @@ class ForkedDebuggerThread extends Thread {
                                      DataInputStream inputStream) {
     ApplicationManager.getApplication().invokeLater(() -> {
       final ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(myProject);
-      ContentManager contentManager = toolWindowManager.getToolWindow(ToolWindowId.DEBUG).getContentManager();
-      Content content = contentManager.findContent(processName);
-      if (content != null) {
-        RunContentDescriptor descriptor = content.getUserData(RunContentDescriptor.DESCRIPTOR_KEY);
-        if (descriptor != null) {
-          ProcessHandler handler = descriptor.getProcessHandler();
-          if (handler != null) {
-            handler.destroyProcess();
+      ToolWindow window = toolWindowManager.getToolWindow(ToolWindowId.DEBUG);
+      if (window != null) {
+        ContentManager contentManager = window.getContentManager();
+        Content content = contentManager.findContent(processName);
+        if (content != null) {
+          RunContentDescriptor descriptor = content.getUserData(RunContentDescriptor.DESCRIPTOR_KEY);
+          if (descriptor != null) {
+            ProcessHandler handler = descriptor.getProcessHandler();
+            if (handler != null) {
+              handler.destroyProcess();
+            }
           }
         }
       }
@@ -208,17 +216,27 @@ class ForkedDebuggerThread extends Thread {
   private static void runDebugConfiguration(@NotNull RunnerAndConfigurationSettings runSettings, ProgramRunner.Callback callback) {
     try {
       runSettings.setActivateToolWindowBeforeRun(false);
-      ExecutionEnvironment environment = ExecutionEnvironmentBuilder.create(DefaultDebugExecutor.getDebugExecutorInstance(), runSettings)
+      ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder.create(DefaultDebugExecutor.getDebugExecutorInstance(), runSettings)
         .contentToReuse(null)
         .dataContext(null)
-        .activeTarget()
-        .build();
+        .activeTarget();
+      buildWithRuntimeModuleDir(runSettings, builder);
+      ExecutionEnvironment environment = builder.build();
       ApplicationManager.getApplication().invokeAndWait(() -> {
         ProgramRunnerUtil.executeConfigurationAsync(environment, true, true, callback);
       });
     }
     catch (ExecutionException e) {
       ExternalSystemTaskDebugRunner.LOG.error(e);
+    }
+  }
+
+  private static void buildWithRuntimeModuleDir(@NotNull RunnerAndConfigurationSettings runSettings, ExecutionEnvironmentBuilder builder) {
+    RunConfiguration configuration = runSettings.getConfiguration();
+    if (configuration instanceof UserDataHolder) {
+      String moduleDir = ((UserDataHolder)configuration).getUserData(RUNTIME_MODULE_DIR_KEY);
+      if (moduleDir != null)
+        builder.modulePath(moduleDir);
     }
   }
 
@@ -248,10 +266,13 @@ class ForkedDebuggerThread extends Thread {
     @Override
     public void processTerminated(@NotNull ProcessEvent event) {
       final ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(myProject);
-      ContentManager contentManager = toolWindowManager.getToolWindow(ToolWindowId.DEBUG).getContentManager();
-      Content content = myDescriptor.getAttachedContent();
-      if (content != null) {
-        ApplicationManager.getApplication().invokeLater(() -> contentManager.removeContent(content, true));
+      ToolWindow window = toolWindowManager.getToolWindow(ToolWindowId.DEBUG);
+      if (window != null) {
+        ContentManager contentManager = window.getContentManager();
+        Content content = myDescriptor.getAttachedContent();
+        if (content != null) {
+          ApplicationManager.getApplication().invokeLater(() -> contentManager.removeContent(content, true));
+        }
       }
 
       removeLink();

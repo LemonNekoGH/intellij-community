@@ -8,6 +8,9 @@ import com.intellij.diagnostic.StartUpMeasurer;
 import com.intellij.diagnostic.ThreadDumper;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.plugins.DynamicPluginListener;
+import com.intellij.ide.plugins.IdeaPluginDescriptor;
+import com.intellij.ide.plugins.cl.PluginAwareClassLoader;
 import com.intellij.internal.statistic.IdeActivity;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -38,7 +41,6 @@ import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.ex.ProgressIndicatorEx;
 import com.intellij.openapi.wm.ex.StatusBarEx;
-import com.intellij.util.containers.Queue;
 import com.intellij.util.exception.FrequentErrorLogger;
 import com.intellij.util.indexing.IndexingBundle;
 import com.intellij.util.ui.DeprecationStripePanel;
@@ -49,9 +51,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
@@ -68,7 +70,7 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
   private long myModificationCount;
 
 
-  private final Queue<Runnable> myRunWhenSmartQueue = new Queue<>(5);
+  private final Deque<Runnable> myRunWhenSmartQueue = new ArrayDeque<>(5);
   private final Project myProject;
 
   private final TrackedEdtActivityService myTrackedEdtActivityService;
@@ -81,7 +83,7 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
   //used from EDT
   private final DumbServiceBalloon myBalloon;
 
-  public DumbServiceImpl(Project project) {
+  public DumbServiceImpl(@NotNull Project project) {
     myProject = project;
     myTrackedEdtActivityService = new TrackedEdtActivityService(project);
     myTaskQueue = new DumbServiceMergingTaskQueue();
@@ -95,12 +97,23 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
     myBalloon = new DumbServiceBalloon(project, this);
     myAlternativeResolveTracker = new DumbServiceAlternativeResolveTracker();
     myState = new AtomicReference<>(project.isDefault() ? State.SMART : State.WAITING_PROJECT_SMART_MODE_STARTUP_TASKS);
+
+    project.getMessageBus().simpleConnect().subscribe(DynamicPluginListener.TOPIC, new DynamicPluginListener() {
+      @Override
+      public void beforePluginUnload(@NotNull IdeaPluginDescriptor pluginDescriptor, boolean isUpdate) {
+        myRunWhenSmartQueue.removeIf(runnable -> {
+          ClassLoader classLoader = runnable.getClass().getClassLoader();
+          return classLoader instanceof PluginAwareClassLoader &&
+                 ((PluginAwareClassLoader)classLoader).getPluginId().equals(pluginDescriptor.getPluginId());
+        });
+      }
+    });
   }
 
   void queueStartupActivitiesRequiredForSmartMode() {
-    LOG.assertTrue(myState.compareAndSet(State.WAITING_PROJECT_SMART_MODE_STARTUP_TASKS,
-                                         State.RUNNING_PROJECT_SMART_MODE_STARTUP_TASKS),
-                   "actual state: " + myState.get() + ", project " + getProject());
+    boolean changed = myState.compareAndSet(State.WAITING_PROJECT_SMART_MODE_STARTUP_TASKS,
+                                          State.RUNNING_PROJECT_SMART_MODE_STARTUP_TASKS);
+    LOG.assertTrue(changed, "actual state: " + myState.get() + ", project " + getProject());
 
     List<StartupActivity.RequiredForSmartMode> activities = REQUIRED_FOR_SMART_MODE_STARTUP_ACTIVITY.getExtensionList();
     if (activities.isEmpty()) {
@@ -182,6 +195,7 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
 
   @TestOnly
   public void setDumb(boolean dumb) {
+    ApplicationManager.getApplication().assertIsDispatchThread();
     if (dumb) {
       myState.set(State.RUNNING_DUMB_TASKS);
       myPublisher.enteredDumbMode();
@@ -333,10 +347,10 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
       while (!isDumb()) {
         final Runnable runnable;
         synchronized (myRunWhenSmartQueue) {
-          if (myRunWhenSmartQueue.isEmpty()) {
+          runnable = myRunWhenSmartQueue.pollFirst();
+          if (runnable == null) {
             break;
           }
-          runnable = myRunWhenSmartQueue.pullFirst();
         }
         doRun(runnable);
       }
@@ -397,9 +411,21 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
     if (application.isReadAccessAllowed() || application.isDispatchThread()) {
       throw new AssertionError("Don't invoke waitForSmartMode from inside read action in dumb mode");
     }
+    CountDownLatch switched;
+    synchronized (myRunWhenSmartQueue) {
+      if (!isDumb()) {
+        return;
+      }
+      switched = new CountDownLatch(1);
+      myRunWhenSmartQueue.addLast(() -> switched.countDown());
+    }
 
     while (myState.get() != State.SMART && !myProject.isDisposed()) {
-      LockSupport.parkNanos(50_000_000);
+      try {
+        switched.await(50, TimeUnit.MILLISECONDS);
+      }
+      catch (InterruptedException ignored) {
+      }
       ProgressManager.checkCanceled();
     }
   }
@@ -426,7 +452,7 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
   @Override
   public JComponent wrapWithSpoiler(@NotNull JComponent dumbAwareContent, @NotNull Runnable updateRunnable, @NotNull Disposable parentDisposable) {
     //TODO replace with a proper mockup implementation
-    DeprecationStripePanel stripePanel = new DeprecationStripePanel(IdeBundle.message("dumb.mode.spoiler.wrapper.text"), AllIcons.General.Warning)
+    DeprecationStripePanel stripePanel = new DeprecationStripePanel(IdeBundle.message("dumb.mode.results.might.be.incomplete"), AllIcons.General.Warning)
       .withAlternativeAction(IdeBundle.message("dumb.mode.spoiler.wrapper.reload.text"), new DumbAwareAction() {
         @Override
         public void actionPerformed(@NotNull AnActionEvent e) {
@@ -535,7 +561,7 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
 
     // Only one thread can execute this method at the same time at this point.
 
-    try (ProgressSuspender suspender = ProgressSuspender.markSuspendable(visibleIndicator, "Indexing paused")) {
+    try (ProgressSuspender suspender = ProgressSuspender.markSuspendable(visibleIndicator, IdeBundle.message("progress.text.indexing.paused"))) {
       myHeavyActivities.setCurrentSuspenderAndSuspendIfRequested(suspender);
 
       IdeActivity activity = IdeActivity.started(myProject, "indexing");

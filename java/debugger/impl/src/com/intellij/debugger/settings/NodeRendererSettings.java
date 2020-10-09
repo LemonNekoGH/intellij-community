@@ -52,10 +52,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-@State(name = "NodeRendererSettings", storages = {
-  @Storage("debugger.xml"),
-  @Storage(value = "debugger.renderers.xml", deprecated = true),
-})
+@State(name = "NodeRendererSettings", storages = @Storage("debugger.xml"))
 public class NodeRendererSettings implements PersistentStateComponent<Element> {
   private static final Logger LOG = Logger.getInstance(NodeRendererSettings.class);
 
@@ -585,7 +582,7 @@ public class NodeRendererSettings implements PersistentStateComponent<Element> {
     }
   }
 
-  static void visitAnnotatedElements(String annotationFqn, Project project, BiConsumer<PsiModifierListOwner, PsiAnnotation> consumer) {
+  static void visitAnnotatedElements(String annotationFqn, Project project, BiConsumer<? super PsiModifierListOwner, ? super PsiAnnotation> consumer) {
     JavaAnnotationIndex.getInstance().get(StringUtil.getShortName(annotationFqn), project, GlobalSearchScope.allScope(project))
       .forEach(annotation -> {
         PsiElement parent = annotation.getContext();

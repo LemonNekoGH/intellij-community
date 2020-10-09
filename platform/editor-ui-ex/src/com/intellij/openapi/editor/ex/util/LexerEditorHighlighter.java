@@ -31,6 +31,7 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.util.text.ImmutableCharSequence;
 import com.intellij.util.text.SingleCharSequence;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -274,15 +275,16 @@ public class LexerEditorHighlighter implements EditorHighlighter, PrioritizedDoc
       int repaintEnd = -1;
       int insertSegmentCount = 0;
       int oldEndIndex = -1;
+      int shift = e.getNewLength() - e.getOldLength();
+      int newEndOffset = e.getOffset() + e.getNewLength();
       for (IElementType tokenType = lexerWrapper.getTokenType(); tokenType != null; tokenType = lexerWrapper.getTokenType()) {
         int lexerState = lexerWrapper.getState();
         int tokenStart = lexerWrapper.getTokenStart();
         int tokenEnd = lexerWrapper.getTokenEnd();
 
         data = mySegments.packData(tokenType, lexerState, canRestart(lexerState));
-        int newEndOffset = e.getOffset() + e.getNewLength();
         if(tokenStart >= newEndOffset && canRestart(lexerState)) {
-          int shiftedTokenStart = tokenStart - e.getNewLength() + e.getOldLength();
+          int shiftedTokenStart = tokenStart - shift;
           int index = mySegments.findSegmentIndex(shiftedTokenStart);
           if (mySegments.getSegmentStart(index) == shiftedTokenStart && mySegments.getSegmentData(index) == data) {
             repaintEnd = tokenStart;
@@ -295,7 +297,6 @@ public class LexerEditorHighlighter implements EditorHighlighter, PrioritizedDoc
         lexerWrapper.advance();
       }
 
-      final int shift = e.getNewLength() - e.getOldLength();
       if (repaintEnd > 0) {
         while (insertSegmentCount > 0 && oldEndIndex > startIndex) {
           if (!segmentsEqual(mySegments, oldEndIndex - 1, insertSegments, insertSegmentCount - 1, shift) ||
@@ -593,6 +594,7 @@ public class LexerEditorHighlighter implements EditorHighlighter, PrioritizedDoc
   }
 
   @Override
+  @NonNls
   public String toString() {
     return getClass().getName() + "(" +
            (myLexer.getClass() == FlexAdapter.class ? myLexer.toString() : myLexer.getClass().getName()) +

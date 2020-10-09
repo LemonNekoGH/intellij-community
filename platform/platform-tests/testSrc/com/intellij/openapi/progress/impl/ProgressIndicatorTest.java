@@ -910,6 +910,20 @@ public class ProgressIndicatorTest extends LightPlatformTestCase {
     indicator.addStateDelegate(new RelayUiToDelegateIndicator(ui));
     indicator.popState(); // should not cause NPE
   }
+
+  public void testRelayUiToDelegateIndicatorMustBeReusable() {
+    ProgressIndicatorEx ui = new ProgressIndicatorBase();
+    RelayUiToDelegateIndicator relay = new RelayUiToDelegateIndicator(ui);
+    ProgressIndicatorBase indicator = new ProgressIndicatorBase(true);
+    indicator.addStateDelegate(relay);
+    indicator.start();
+    indicator.cancel();
+    indicator.stop();
+    indicator.start();
+    indicator.cancel();
+    indicator.removeStateDelegate(relay);
+  }
+
   public void testRelayUiToDelegate() {
     ProgressIndicatorEx ui = new ProgressIndicatorBase();
     ProgressIndicatorEx indicator = new ProgressIndicatorBase();
@@ -936,6 +950,8 @@ public class ProgressIndicatorTest extends LightPlatformTestCase {
   }
 
   public void testRunProcessWithIndicatorAlreadyUsedInTheThisThreadMustBeWarned() {
+    DefaultLogger.disableStderrDumping(getTestRootDisposable());
+
     ProgressIndicatorEx p = new ProgressIndicatorBase();
     ProgressManager.getInstance().executeProcessUnderProgress(() -> {
       boolean allowed = true;
@@ -949,6 +965,7 @@ public class ProgressIndicatorTest extends LightPlatformTestCase {
     }, p);
   }
   public void testRunProcessWithIndicatorAlreadyUsedInTheOtherThreadMustBeWarned() throws Exception {
+    DefaultLogger.disableStderrDumping(getTestRootDisposable());
     ProgressIndicatorEx p = new ProgressIndicatorBase();
     CountDownLatch run = new CountDownLatch(1);
     CountDownLatch exit = new CountDownLatch(1);
@@ -976,5 +993,20 @@ public class ProgressIndicatorTest extends LightPlatformTestCase {
       future.get();
     }
     assertFalse("pm.runProcess() with the progress already used in the other thread must be prohibited", allowed);
+  }
+  
+  public void testRelayUiToDelegateIndicatorCopiesEverything() {
+    ProgressIndicatorBase ui = new ProgressIndicatorBase();
+    ProgressIndicatorBase indicator = new ProgressIndicatorBase();
+    indicator.setIndeterminate(false);
+    indicator.setFraction(0.3141519);
+    indicator.setText("0.3141519");
+    indicator.setText2("2.3141519");
+    indicator.addStateDelegate(new RelayUiToDelegateIndicator(ui));
+    //make sure state is replicated correctly
+    assertFalse(ui.isIndeterminate());
+    assertEquals(0.3141519, ui.getFraction());
+    assertEquals("0.3141519", ui.getText());
+    assertEquals("2.3141519", ui.getText2());
   }
 }

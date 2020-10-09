@@ -7,10 +7,7 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.highlighter.ProjectFileType;
 import com.intellij.ide.impl.OpenProjectTask;
 import com.intellij.ide.impl.ProjectUtil;
-import com.intellij.ide.lightEdit.LightEdit;
-import com.intellij.ide.lightEdit.LightEditCompatible;
-import com.intellij.ide.lightEdit.LightEditFeatureUsagesUtil;
-import com.intellij.ide.lightEdit.LightEditUtil;
+import com.intellij.ide.lightEdit.*;
 import com.intellij.ide.util.PsiNavigationSupport;
 import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -49,7 +46,6 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 import static com.intellij.ide.lightEdit.LightEditFeatureUsagesUtil.OpenPlace.LightEditOpenAction;
-import static com.intellij.ide.lightEdit.LightEditFeatureUsagesUtil.OpenPlace.WelcomeScreenOpenAction;
 
 public class OpenFileAction extends AnAction implements DumbAware, LightEditCompatible {
   @Override
@@ -93,7 +89,7 @@ public class OpenFileAction extends AnAction implements DumbAware, LightEditComp
         presentation.setText(ActionsBundle.message("action.Tabbed.WelcomeScreen.OpenProject.text"));
       }
       else {
-        presentation.setIcon(AllIcons.Actions.Menu_open);
+        presentation.setIcon(AllIcons.Actions.MenuOpen);
       }
     }
   }
@@ -106,7 +102,7 @@ public class OpenFileAction extends AnAction implements DumbAware, LightEditComp
   @Override
   public void update(@NotNull AnActionEvent e) {
     if (NewWelcomeScreen.isNewWelcomeScreen(e)) {
-      e.getPresentation().setIcon(AllIcons.Actions.Menu_open);
+      e.getPresentation().setIcon(AllIcons.Actions.MenuOpen);
     }
   }
 
@@ -140,9 +136,6 @@ public class OpenFileAction extends AnAction implements DumbAware, LightEditComp
 
     if (project != null && !project.isDefault()) {
       openFile(file, project);
-    }
-    else if (LightEdit.openFile(file)) {
-      LightEditFeatureUsagesUtil.logFileOpen(WelcomeScreenOpenAction);
     }
     else {
       PlatformProjectOpenProcessor.createTempProjectAndOpenFile(filePath, OpenProjectTask.withProjectToClose(project));
@@ -185,19 +178,18 @@ public class OpenFileAction extends AnAction implements DumbAware, LightEditComp
     return provider.askConfirmationForOpeningProject(file, project);
   }
 
-  public static void openFile(String filePath, @NotNull Project project) {
+  public static void openFile(@NotNull String filePath, @NotNull Project project) {
     VirtualFile file = LocalFileSystem.getInstance().refreshAndFindFileByPath(filePath);
     if (file != null && file.isValid()) {
       openFile(file, project);
     }
   }
 
-  public static void openFile(VirtualFile file, @NotNull Project project) {
+  public static void openFile(@NotNull VirtualFile file, @NotNull Project project) {
     NonProjectFileWritingAccessProvider.allowWriting(Collections.singletonList(file));
     if (LightEdit.owns(project)) {
-      if (LightEdit.openFile(file)) {
-        LightEditFeatureUsagesUtil.logFileOpen(LightEditOpenAction);
-      }
+      LightEditService.getInstance().openFile(file);
+      LightEditFeatureUsagesUtil.logFileOpen(LightEditOpenAction);
     }
     else {
       PsiNavigationSupport.getInstance().createNavigatable(project, file, -1).navigate(true);

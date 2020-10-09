@@ -5,10 +5,9 @@ import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 import com.intellij.openapi.fileTypes.FileType;
-import com.intellij.openapi.vfs.newvfs.persistent.FSRecords;
-import com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl;
 import com.intellij.util.indexing.flavor.FileIndexingFlavorProvider;
 import com.intellij.util.indexing.flavor.HashBuilder;
+import com.intellij.util.io.DigestUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -27,31 +26,33 @@ public final class IndexedHashesSupport {
   }
 
   public static byte @NotNull [] getOrInitIndexedHash(@NotNull FileContentImpl content) {
-    byte[] hash = content.getHash();
-    if (hash == null) {
-      hash = calculateIndexedHashForFileContent(content);
-      content.setHashes(hash);
-    }
+    byte[] hash = content.getIndexedFileHash();
+    if (hash != null) return hash;
+    byte[] contentHash = getBinaryContentHash(content.getContent());
+    hash = calculateIndexedHash(content, contentHash, false);
+    content.setIndexedFileHash(hash);
     return hash;
   }
 
   public static byte @NotNull [] getBinaryContentHash(byte @NotNull [] content) {
-    MessageDigest digest = FSRecords.getContentHashDigest();
+    // TODO: simplify to calculating content hash of only the content[].
+    // Shared Indexes that are already available on CDN will have their hashes invalidated after it.
+    MessageDigest digest = DigestUtil.sha1();
     digest.update(String.valueOf(content.length).getBytes(StandardCharsets.UTF_8));
     digest.update("\u0000".getBytes(StandardCharsets.UTF_8));
     digest.update(content);
     return digest.digest();
   }
 
-  public static byte @NotNull [] calculateIndexedHash(@NotNull IndexedFile indexedFile, byte @NotNull [] contentHash) {
+  public static byte @NotNull [] calculateIndexedHash(@NotNull IndexedFile indexedFile, byte @NotNull [] contentHash, boolean isUtf8Forced) {
     Hasher hasher = INDEXED_FILE_CONTENT_HASHER.newHasher();
     hasher.putBytes(contentHash);
 
     if (!FileContentImpl.getFileTypeWithoutSubstitution(indexedFile).isBinary()) {
-      Charset charset =
-        indexedFile instanceof FileContentImpl
-        ? ((FileContentImpl)indexedFile).getCharset()
-        : indexedFile.getFile().getCharset();
+      Charset charset = isUtf8Forced ? StandardCharsets.UTF_8 :
+                        indexedFile instanceof FileContentImpl
+                        ? ((FileContentImpl)indexedFile).getCharset()
+                        : indexedFile.getFile().getCharset();
       hasher.putString(charset.name(), StandardCharsets.UTF_8);
     }
 
@@ -85,15 +86,6 @@ public final class IndexedHashesSupport {
     }
 
     return hasher.hash().asBytes();
-  }
-
-  private static byte @NotNull [] calculateIndexedHashForFileContent(@NotNull FileContentImpl content) {
-    byte[] contentHash = PersistentFSImpl.getContentHashIfStored(content.getFile());
-    if (contentHash == null) {
-      contentHash = getBinaryContentHash(content.getContent());
-      // todo store content hash in FS
-    }
-    return calculateIndexedHash(content, contentHash);
   }
 
   private static <F> void buildFlavorHash(@NotNull IndexedFile indexedFile,

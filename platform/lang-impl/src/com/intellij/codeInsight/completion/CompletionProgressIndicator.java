@@ -14,6 +14,7 @@ import com.intellij.codeInsight.lookup.*;
 import com.intellij.codeInsight.lookup.impl.LookupImpl;
 import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.IdeBundle;
 import com.intellij.ide.lightEdit.LightEdit;
 import com.intellij.ide.lightEdit.LightEditUtil;
 import com.intellij.injected.editor.DocumentWindow;
@@ -37,6 +38,7 @@ import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsContexts.HintText;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
@@ -236,7 +238,7 @@ public class CompletionProgressIndicator extends ProgressIndicatorBase implement
 
   private void addDefaultAdvertisements(CompletionParameters parameters) {
     if (DumbService.isDumb(getProject())) {
-      addAdvertisement(CodeInsightBundle.message("completion.incomplete.during.indexing"), AllIcons.General.Warning);
+      addAdvertisement(IdeBundle.message("dumb.mode.results.might.be.incomplete"), AllIcons.General.Warning);
       return;
     }
 
@@ -305,15 +307,17 @@ public class CompletionProgressIndicator extends ProgressIndicatorBase implement
     if (myLookup.isAvailableToUser()) {
       return;
     }
-    for (CompletionContributor contributor : CompletionContributor.forParameters(parameters)) {
-      if (!myLookup.isCalculating() && !myLookup.isVisible()) return;
+    FileBasedIndex.getInstance().ignoreDumbMode(() -> {
+      for (CompletionContributor contributor : CompletionContributor.forParameters(parameters)) {
+        if (!myLookup.isCalculating() && !myLookup.isVisible()) return;
 
-      //noinspection deprecation
-      String s = contributor.advertise(parameters);
-      if (s != null) {
-        addAdvertisement(s, null);
+        //noinspection deprecation
+        String s = contributor.advertise(parameters);
+        if (s != null) {
+          addAdvertisement(s, null);
+        }
       }
-    }
+    }, DumbModeAccessType.RELIABLE_DATA_ONLY);
   }
 
   private boolean isOutdated() {
@@ -793,16 +797,19 @@ public class CompletionProgressIndicator extends ProgressIndicatorBase implement
     CompletionServiceImpl.setCompletionPhase(CompletionPhase.NoCompletion);
   }
 
+  @HintText
   private String getNoSuggestionsMessage(CompletionParameters parameters) {
-    return CompletionContributor.forParameters(parameters)
-                                       .stream()
-                                       .map(c -> c.handleEmptyLookup(parameters, getEditor()))
-                                       .filter(StringUtil::isNotEmpty)
-                                       .findFirst()
-                                       .orElse(LangBundle.message("completion.no.suggestions"));
+    return FileBasedIndex.getInstance().ignoreDumbMode(DumbModeAccessType.RELIABLE_DATA_ONLY, () -> {
+      return CompletionContributor.forParameters(parameters)
+        .stream()
+        .map(c -> c.handleEmptyLookup(parameters, getEditor()))
+        .filter(StringUtil::isNotEmpty)
+        .findFirst()
+        .orElse(LangBundle.message("completion.no.suggestions"));
+    });
   }
 
-  private LightweightHint showErrorHint(Project project, Editor editor, String text) {
+  private LightweightHint showErrorHint(Project project, Editor editor, @HintText String text) {
     LightweightHint[] result = {null};
     EditorHintListener listener = (project1, hint, flags) -> result[0] = hint;
     SimpleMessageBusConnection connection = project.getMessageBus().simpleConnect();
@@ -920,7 +927,7 @@ public class CompletionProgressIndicator extends ProgressIndicatorBase implement
 
   private static class ProjectEmptyCompletionNotifier implements EmptyCompletionNotifier {
     @Override
-    public void showIncompleteHint(@NotNull Editor editor, @NotNull String text, boolean isDumbMode) {
+    public void showIncompleteHint(@NotNull Editor editor, @NotNull @HintText String text, boolean isDumbMode) {
       String message = isDumbMode ?
                        text + CodeInsightBundle.message("completion.incomplete.during.indexing.suffix") : text;
       HintManager.getInstance().showInformationHint(editor, StringUtil.escapeXmlEntities(message), HintManager.UNDER);

@@ -4,10 +4,7 @@
 package com.intellij.java.navigation
 
 import com.intellij.codeInsight.JavaProjectCodeInsightSettings
-import com.intellij.ide.actions.searcheverywhere.ClassSearchEverywhereContributor
-import com.intellij.ide.actions.searcheverywhere.FileSearchEverywhereContributor
-import com.intellij.ide.actions.searcheverywhere.SearchEverywhereContributor
-import com.intellij.ide.actions.searcheverywhere.SymbolSearchEverywhereContributor
+import com.intellij.ide.actions.searcheverywhere.*
 import com.intellij.ide.util.scopeChooser.ScopeDescriptor
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.mock.MockProgressIndicator
@@ -465,6 +462,24 @@ class Intf {
     assert gotoFile('objc/features/i') == [index, i18n]
   }
 
+  void "test search for full name"() {
+    def file1 = addEmptyFile("Folder/Web/SubFolder/Flow.html")
+    def file2 = addEmptyFile("Folder/Web/SubFolder/Flow/Helper.html")
+
+    def contributor = createFileContributor(project, testRootDisposable)
+    def files = calcWeightedContributorElements(contributor as WeightedSearchEverywhereContributor<?>, "Folder/Web/SubFolder/Flow.html")
+    assert files == [file1, file2]
+  }
+
+  void "test prefer name match over path match"() {
+    def nameMatchFile = addEmptyFile("JBCefBrowser.java")
+    def pathMatchFile = addEmptyFile("com/elements/folder/WebBrowser.java")
+
+    def contributor = createFileContributor(project, testRootDisposable)
+    def files = calcWeightedContributorElements(contributor as WeightedSearchEverywhereContributor<?>, "CefBrowser")
+    assert files == [nameMatchFile, pathMatchFile]
+  }
+
   void "test matching file in a matching directory"() {
     def file = addEmptyFile("foo/index/index")
     assert gotoFile('in') == [file, file.parent]
@@ -556,6 +571,13 @@ class Intf {
 
   static List<Object> calcContributorElements(SearchEverywhereContributor<?> contributor, String text) {
     return contributor.search(text, new MockProgressIndicator(), ELEMENTS_LIMIT).items
+  }
+
+  static List<Object> calcWeightedContributorElements(WeightedSearchEverywhereContributor<?> contributor, String text) {
+    def items = contributor.searchWeightedElements(text, new MockProgressIndicator(), ELEMENTS_LIMIT).items
+    return new ArrayList<>(items)
+      .sort{-(it as FoundItemDescriptor<?>).weight}
+      .collect{(it as FoundItemDescriptor<?>).item}
   }
 
   static SearchEverywhereContributor<Object> createClassContributor(Project project,

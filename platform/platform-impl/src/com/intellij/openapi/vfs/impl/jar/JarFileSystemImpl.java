@@ -4,13 +4,12 @@ package com.intellij.openapi.vfs.impl.jar;
 import com.intellij.concurrency.ConcurrentCollectionFactory;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.io.FileAttributes;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.DiskQueryRelay;
 import com.intellij.openapi.vfs.IntegrityCheckCapableFileSystem;
 import com.intellij.openapi.vfs.JarFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.impl.ArchiveHandler;
 import com.intellij.openapi.vfs.impl.ZipHandlerBase;
@@ -35,21 +34,6 @@ public class JarFileSystemImpl extends JarFileSystem implements IntegrityCheckCa
     // to prevent platform .jar files from copying
     boolean runningFromDist = new File(PathManager.getLibPath(), "openapi.jar").exists();
     myNoCopyJarDir = !runningFromDist ? null : new File(PathManager.getHomePath());
-  }
-
-  private final DiskQueryRelay<VirtualFile, FileAttributes> myAttrGetter = new DiskQueryRelay<>(super::getAttributes);
-
-  @Nullable
-  @Override
-  public FileAttributes getAttributes(@NotNull VirtualFile file) {
-    return myAttrGetter.accessDiskWithCheckCanceled(file);
-  }
-
-  private final DiskQueryRelay<VirtualFile, String[]> myChildrenGetter = new DiskQueryRelay<>(super::list);
-
-  @Override
-  public String @NotNull [] list(@NotNull VirtualFile file) {
-    return myChildrenGetter.accessDiskWithCheckCanceled(file);
   }
 
   @Override
@@ -121,6 +105,13 @@ public class JarFileSystemImpl extends JarFileSystem implements IntegrityCheckCa
   protected ArchiveHandler getHandler(@NotNull VirtualFile entryFile) {
     boolean useNewJarHandler = SystemInfo.isWindows && Registry.is("vfs.use.new.jar.handler");
     return VfsImplUtil.getHandler(this, entryFile, useNewJarHandler ? BasicJarHandler::new : JarHandler::new);
+  }
+
+  @TestOnly
+  public void markDirtyAndRefreshVirtualFileDeepInsideJarForTest(@NotNull VirtualFile file) {
+    // clear caches in ArchiveHandler so that refresh will actually refresh something
+    getHandler(file).dispose();
+    VfsUtil.markDirtyAndRefresh(false, true, true, file);
   }
 
   @Override

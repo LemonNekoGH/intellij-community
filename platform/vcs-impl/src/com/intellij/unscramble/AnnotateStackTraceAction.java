@@ -37,6 +37,8 @@ import com.intellij.openapi.vcs.history.VcsHistorySession;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
+import com.intellij.util.concurrency.annotations.RequiresReadLock;
 import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.DateFormatUtil;
@@ -45,12 +47,7 @@ import com.intellij.util.ui.update.Update;
 import com.intellij.vcs.history.VcsHistoryProviderEx;
 import com.intellij.vcsUtil.VcsUtil;
 import com.intellij.xml.util.XmlStringUtil;
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import it.unimi.dsi.fastutil.ints.IntArrayList;
-import it.unimi.dsi.fastutil.ints.IntListIterator;
-import org.jetbrains.annotations.CalledInAwt;
-import org.jetbrains.annotations.CalledWithReadLock;
+import it.unimi.dsi.fastutil.ints.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -98,7 +95,7 @@ public final class AnnotateStackTraceAction extends DumbAwareAction {
 
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
-        Map<VirtualFile, IntArrayList> files2lines = CollectionFactory.createSmallMemoryFootprintMap();
+        Map<VirtualFile, IntList> files2lines = CollectionFactory.createSmallMemoryFootprintMap();
         Int2ObjectMap<LastRevision> revisions = new Int2ObjectOpenHashMap<>();
 
         ApplicationManager.getApplication().runReadAction(() -> {
@@ -111,9 +108,9 @@ public final class AnnotateStackTraceAction extends DumbAwareAction {
           }
         });
 
-        for (Map.Entry<VirtualFile, IntArrayList> entry : files2lines.entrySet()) {
+        for (Map.Entry<VirtualFile, IntList> entry : files2lines.entrySet()) {
           VirtualFile file = entry.getKey();
-          IntArrayList value = entry.getValue();
+          IntList value = entry.getValue();
           indicator.checkCanceled();
           LastRevision revision = getLastRevision(file);
           if (revision == null) {
@@ -137,7 +134,7 @@ public final class AnnotateStackTraceAction extends DumbAwareAction {
         ApplicationManager.getApplication().invokeLater(() -> updateGutter(indicator, revisions));
       }
 
-      @CalledInAwt
+      @RequiresEdt
       private void updateGutter(@NotNull ProgressIndicator indicator, @NotNull Map<Integer, LastRevision> revisions) {
         if (indicator.isCanceled()) return;
 
@@ -190,7 +187,7 @@ public final class AnnotateStackTraceAction extends DumbAwareAction {
   }
 
   @Nullable
-  @CalledWithReadLock
+  @RequiresReadLock
   private static VirtualFile getHyperlinkVirtualFile(@NotNull List<RangeHighlighter> links) {
     RangeHighlighter key = ContainerUtil.getLastItem(links);
     if (key == null) return null;
@@ -216,7 +213,7 @@ public final class AnnotateStackTraceAction extends DumbAwareAction {
     @NotNull
     public static LastRevision create(@NotNull VcsFileRevision revision) {
       VcsRevisionNumber number = revision.getRevisionNumber();
-      String author = StringUtil.notNullize(revision.getAuthor(), "Unknown");
+      String author = StringUtil.notNullize(revision.getAuthor(), VcsBundle.message("vfs.revision.author.unknown"));
       Date date = revision.getRevisionDate();
       String message = StringUtil.notNullize(revision.getCommitMessage());
       return new LastRevision(number, author, date, message);
@@ -328,7 +325,7 @@ public final class AnnotateStackTraceAction extends DumbAwareAction {
       myIndicator.cancel();
     }
 
-    @CalledInAwt
+    @RequiresEdt
     public void updateData(@NotNull Map<Integer, LastRevision> revisions) {
       myRevisions = revisions;
 

@@ -13,6 +13,7 @@ import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.util.containers.ContainerUtil;
@@ -27,10 +28,24 @@ public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfi
   private final static Logger LOG = Logger.getInstance(RunConfigurationFragmentedEditor.class);
   private final Settings myRunConfiguration;
   private final RunConfigurationExtensionsManager<RunConfigurationBase<?>, RunConfigurationExtensionBase<RunConfigurationBase<?>>> myExtensionsManager;
+  private boolean myDefaultSettings;
 
   protected RunConfigurationFragmentedEditor(Settings runConfiguration, RunConfigurationExtensionsManager extensionsManager) {
     myRunConfiguration = runConfiguration;
     myExtensionsManager = extensionsManager;
+  }
+
+  @Override
+  protected boolean isDefaultSettings() {
+    return myDefaultSettings;
+  }
+
+  public Settings getRunConfiguration() {
+    return myRunConfiguration;
+  }
+
+  protected Project getProject() {
+    return myRunConfiguration.getProject();
   }
 
   @Override
@@ -63,9 +78,9 @@ public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfi
         component.add(runnerEditor.getComponent(), configEditor == null ? BorderLayout.CENTER : BorderLayout.SOUTH);
       }
       RunConfigurationEditorFragment<Settings, JComponent> fragment =
-        new RunConfigurationEditorFragment<Settings, JComponent>(executor.getId() + ".config", executor.getStartActionText(),
-                                                                 ExecutionBundle.message("run.configuration.startup.connection.rab.title"),
-                                                                 component, 0) {
+        new RunConfigurationEditorFragment<>(executor.getId() + ".config", executor.getStartActionText(),
+                                             ExecutionBundle.message("run.configuration.startup.connection.rab.title"),
+                                             component, 0) {
           @Override
           public void resetEditorFrom(@NotNull RunnerAndConfigurationSettingsImpl s) {
             if (configEditor != null) {
@@ -104,6 +119,7 @@ public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfi
   protected abstract List<SettingsEditorFragment<Settings, ?>> createRunFragments();
 
   public void resetEditorFrom(@NotNull RunnerAndConfigurationSettingsImpl s) {
+    myDefaultSettings = s.isTemplate();
     for (RunConfigurationEditorFragment<?,?> fragment : getRunFragments()) {
       fragment.resetEditorFrom(s);
     }
@@ -122,4 +138,6 @@ public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfi
                                                 ? (RunConfigurationEditorFragment<?,?>)fragment
                                                 : null);
   }
+
+  public void targetChanged(String targetName) {}
 }

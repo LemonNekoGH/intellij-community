@@ -8,6 +8,7 @@ import com.intellij.ide.fileTemplates.FileTemplatesScheme;
 import com.intellij.ide.fileTemplates.InternalTemplateBean;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.diagnostic.DefaultLogger;
 import com.intellij.openapi.extensions.DefaultPluginDescriptor;
 import com.intellij.openapi.extensions.ExtensionPoint;
 import com.intellij.openapi.project.Project;
@@ -75,7 +76,7 @@ public class LightFileTemplatesTest extends LightPlatformTestCase {
     try {
       configurable.createComponent();
       configurable.reset();
-      FileTemplate template = configurable.createTemplate("foo", "bar", "hey");
+      FileTemplate template = configurable.createTemplate("foo", "bar", "hey", false);
       assertTrue(configurable.isModified());
       FileTemplate[] templates = configurable.getTabs()[0].getTemplates();
       assertTrue(ArrayUtil.contains(template, templates));
@@ -232,6 +233,7 @@ public class LightFileTemplatesTest extends LightPlatformTestCase {
   }
 
   public void testInternalTemplatePlugin() {
+    DefaultLogger.disableStderrDumping(getTestRootDisposable());
     ExtensionPoint<InternalTemplateBean> point = InternalTemplateBean.EP_NAME.getPoint();
     InternalTemplateBean bean = new InternalTemplateBean();
     bean.name = "Unknown";
@@ -246,6 +248,36 @@ public class LightFileTemplatesTest extends LightPlatformTestCase {
       PluginException pluginException = ((PluginException)e.getCause());
       assertEquals("test", pluginException.getPluginId().getIdString());
     }
+  }
+
+  public void _testMultiFile() {
+    FileTemplate template = myTemplateManager.addTemplate("foo", "txt");
+    CustomFileTemplate child =
+      (CustomFileTemplate)myTemplateManager.addTemplate("foo.txt" + FileTemplateBase.TEMPLATE_CHILDREN_SUFFIX + "1", "txt");
+    template.setChildren(new FileTemplate[]{child});
+    myTemplateManager.saveAllTemplates();
+    FTManager ftManager = ServiceManager.getService(ProjectManager.getInstance().getDefaultProject(), FileTemplateSettings.class).getDefaultTemplatesManager();
+    ftManager.getTemplates().clear();
+    ftManager.loadCustomizedContent();
+    FileTemplateBase loaded = ftManager.getTemplate("foo.txt");
+    assertNotNull(loaded);
+    assertEquals(1, loaded.getChildren().length);
+    FileTemplateBase t = ftManager.getTemplate(child.getQualifiedName());
+    assertNotNull(t);
+  }
+
+  public void testMultiFileSettings() {
+    FileTemplate template = myTemplateManager.getTemplate(TEST_TEMPLATE_TXT);
+    CustomFileTemplate child = new CustomFileTemplate("child", "txt");
+    child.setFileName("child");
+    template.setChildren(new FileTemplate[]{child});
+    FileTemplateSettings settings = ServiceManager.getService(ExportableFileTemplateSettings.class);
+    Element state = settings.getState();
+    assertNotNull(state);
+    Element element = state.getChildren().get(0).getChildren().get(0);
+    assertEquals("<template name=\"testTemplate.txt\" reformat=\"true\" live-template-enabled=\"false\" enabled=\"true\">\n" +
+                 "  <template name=\"child.txt\" file-name=\"child\" reformat=\"true\" live-template-enabled=\"false\" />\n" +
+                 "</template>", JDOMUtil.writeElement(element));
   }
 
   private FileTemplateManagerImpl myTemplateManager;

@@ -3,10 +3,7 @@ package com.intellij.ide.lightEdit;
 
 import com.intellij.diagnostic.IdeMessagePanel;
 import com.intellij.ide.lightEdit.menuBar.LightEditMenuBar;
-import com.intellij.ide.lightEdit.statusBar.LightEditAutosaveWidget;
-import com.intellij.ide.lightEdit.statusBar.LightEditEncodingWidgetWrapper;
-import com.intellij.ide.lightEdit.statusBar.LightEditLineSeparatorWidgetWrapper;
-import com.intellij.ide.lightEdit.statusBar.LightEditPositionWidget;
+import com.intellij.ide.lightEdit.statusBar.*;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.application.ApplicationManager;
@@ -57,16 +54,19 @@ final class LightEditFrameWrapper extends ProjectFrameHelper implements Disposab
   protected void installDefaultProjectStatusBarWidgets(@NotNull Project project) {
     LightEditorManager editorManager = LightEditService.getInstance().getEditorManager();
     IdeStatusBarImpl statusBar = Objects.requireNonNull(getStatusBar());
-    statusBar.addWidget(new LightEditPositionWidget(editorManager), StatusBar.Anchors.before(IdeMessagePanel.FATAL_ERROR), this);
+    statusBar.addWidgetToLeft(new LightEditModeNotificationWidget(), this);
+    statusBar.addWidget(new LightEditPositionWidget(project, editorManager), StatusBar.Anchors.before(IdeMessagePanel.FATAL_ERROR), this);
     statusBar.addWidget(new LightEditAutosaveWidget(editorManager), StatusBar.Anchors.before(IdeMessagePanel.FATAL_ERROR), this);
-    statusBar.addWidget(new LightEditEncodingWidgetWrapper(), StatusBar.Anchors.after(StatusBar.StandardWidgets.POSITION_PANEL), this);
-    statusBar.addWidget(new LightEditLineSeparatorWidgetWrapper(), StatusBar.Anchors.before(LightEditEncodingWidgetWrapper.WIDGET_ID), this);
+    statusBar.addWidget(new LightEditEncodingWidgetWrapper(project), StatusBar.Anchors.after(StatusBar.StandardWidgets.POSITION_PANEL), this);
+    statusBar.addWidget(new LightEditLineSeparatorWidgetWrapper(project), StatusBar.Anchors.before(LightEditEncodingWidgetWrapper.WIDGET_ID),
+                        this);
 
     PopupHandler.installPopupHandler(statusBar, StatusBarWidgetsActionGroup.GROUP_ID, ActionPlaces.STATUS_BAR_PLACE);
+    StatusBarWidgetsManager statusBarWidgetsManager = project.getService(StatusBarWidgetsManager.class);
     ApplicationManager.getApplication().invokeLater(() -> {
-      // instantiate StatusBarWidgetsManager and create widgets provided by extensions
-      project.getService(StatusBarWidgetsManager.class);
+      statusBarWidgetsManager.updateAllWidgets();
     });
+    Disposer.register(statusBar, () -> statusBarWidgetsManager.disableAllWidgets());
   }
 
   @Override
@@ -99,7 +99,7 @@ final class LightEditFrameWrapper extends ProjectFrameHelper implements Disposab
     @NotNull
     @Override
     protected Component getCenterComponent(@NotNull JFrame frame, @NotNull Disposable parentDisposable) {
-      myEditPanel = new LightEditPanel();
+      myEditPanel = new LightEditPanel(LightEditUtil.requireProject());
       return myEditPanel;
     }
 
@@ -117,7 +117,17 @@ final class LightEditFrameWrapper extends ProjectFrameHelper implements Disposab
     @NotNull
     @Override
     protected IdeStatusBarImpl createStatusBar(@NotNull IdeFrame frame) {
-      return new IdeStatusBarImpl(frame, false);
+      return new IdeStatusBarImpl(frame, false) {
+        @Override
+        public void updateUI() {
+          setUI(new LightEditStatusBarUI());
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+          return LightEditStatusBarUI.withHeight(super.getPreferredSize());
+        }
+      };
     }
 
     @Override
@@ -133,10 +143,10 @@ final class LightEditFrameWrapper extends ProjectFrameHelper implements Disposab
     }
   }
 
-  static @NotNull LightEditFrameWrapper allocate(@NotNull BooleanSupplier closeHandler) {
-    return (LightEditFrameWrapper)((WindowManagerImpl)WindowManager.getInstance()).allocateFrame(
-      LightEditUtil.getProject(),
-      () -> new LightEditFrameWrapper(ProjectFrameAllocatorKt.createNewProjectFrame(false), closeHandler));
+  static @NotNull LightEditFrameWrapper allocate(@NotNull Project project, @NotNull BooleanSupplier closeHandler) {
+    return (LightEditFrameWrapper)((WindowManagerImpl)WindowManager.getInstance()).allocateFrame(project, () -> {
+      return new LightEditFrameWrapper(ProjectFrameAllocatorKt.createNewProjectFrame(false, null), closeHandler);
+    });
   }
 
   void setFrameTitleUpdateEnabled(boolean frameTitleUpdateEnabled) {

@@ -11,7 +11,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.Processor;
 import com.intellij.util.indexing.*;
 import com.intellij.util.indexing.impl.AbstractUpdateData;
-import com.intellij.util.indexing.roots.IndexableFilesProvider;
+import com.intellij.util.indexing.impl.InputDataDiffBuilder;
 import com.intellij.util.indexing.snapshot.SnapshotSingleValueIndexStorage;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -33,7 +33,7 @@ public class EmptyFileBasedIndex extends FileBasedIndexEx {
   }
 
   @Override
-  public void registerIndexableSet(@NotNull IndexableFileSet set, @Nullable Project project) {
+  public void registerIndexableSet(@NotNull IndexableFileSet set, @NotNull Project project) {
 
   }
 
@@ -175,11 +175,6 @@ public class EmptyFileBasedIndex extends FileBasedIndexEx {
   }
 
   @Override
-  public @NotNull List<IndexableFilesProvider> getOrderedIndexableFilesProviders(@NotNull Project project) {
-    return super.getOrderedIndexableFilesProviders(project);
-  }
-
-  @Override
   public <K, V> UpdatableIndex<K, V, FileContent> getIndex(ID<K, V> indexId) {
     return EmptyIndex.getInstance();
   }
@@ -218,7 +213,12 @@ public class EmptyFileBasedIndex extends FileBasedIndexEx {
     }
 
     @Override
-    public void resetIndexedStateForFile(int fileId) {
+    public void invalidateIndexedStateForFile(int fileId) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void setUnindexedStateForFile(int fileId) {
       throw new UnsupportedOperationException();
     }
 
@@ -237,7 +237,8 @@ public class EmptyFileBasedIndex extends FileBasedIndexEx {
     }
 
     @Override
-    public void removeTransientDataForKeys(int inputId, @NotNull Collection<? extends Key> keys) {
+    public void removeTransientDataForKeys(int inputId, @NotNull InputDataDiffBuilder<Key, Value> diffBuilder) {
+
     }
 
     @Override

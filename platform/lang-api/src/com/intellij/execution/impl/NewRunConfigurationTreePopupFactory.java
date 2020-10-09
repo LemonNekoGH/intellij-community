@@ -3,9 +3,15 @@ package com.intellij.execution.impl;
 
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationType;
+import com.intellij.execution.configurations.ConfigurationTypeUtil;
+import com.intellij.ide.projectView.PresentationData;
 import com.intellij.ide.util.treeView.NodeDescriptor;
+import com.intellij.ide.util.treeView.PresentableNodeDescriptor;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.Pair;
+import com.intellij.ui.SimpleTextAttributes;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -59,15 +65,19 @@ public abstract class NewRunConfigurationTreePopupFactory {
     }
 
     Pair<Icon, String> iconAndText = createIconAndText(element);
-    return new NodeDescriptor(project, parentDescriptor) {
-      {
-        myClosedIcon = iconAndText.first;
-        myName = iconAndText.second;
+    SimpleTextAttributes attributes =
+      (!project.isDefault() && DumbService.getInstance(project).isDumb() && !isEditableInDumbMode(element)) ?
+      SimpleTextAttributes.GRAYED_ATTRIBUTES : SimpleTextAttributes.REGULAR_ATTRIBUTES;
+    return new PresentableNodeDescriptor<>(project, parentDescriptor) {
+      @Override
+      protected void update(@NotNull PresentationData presentation) {
+        presentation.addText(iconAndText.second, attributes);
+        presentation.setIcon(iconAndText.first);
       }
 
       @Override
-      public boolean update() {
-        return false;
+      public @NlsSafe String toString() {
+        return iconAndText.second;
       }
 
       @Override
@@ -80,5 +90,15 @@ public abstract class NewRunConfigurationTreePopupFactory {
         return element;
       }
     };
+  }
+
+  static boolean isEditableInDumbMode(@NotNull Object element) {
+    if (element instanceof ConfigurationFactory) {
+      return ((ConfigurationFactory)element).isEditableInDumbMode();
+    }
+    if (element instanceof ConfigurationType) {
+      return ConfigurationTypeUtil.isEditableInDumbMode((ConfigurationType)element);
+    }
+    return false;
   }
 }

@@ -1,14 +1,19 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.gradle.codeInsight.actions;
 
+import com.intellij.codeInsight.CodeInsightSettings;
 import com.intellij.ide.DataManager;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
 import com.intellij.openapi.editor.actionSystem.EditorActionManager;
 import com.intellij.testFramework.LightJavaCodeInsightTestCase;
+import com.intellij.util.ExceptionUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.concurrent.TimeUnit;
 
 public class MvnDependencyPasteTest extends LightJavaCodeInsightTestCase {
 
@@ -39,20 +44,24 @@ public class MvnDependencyPasteTest extends LightJavaCodeInsightTestCase {
   public void test_DoNotConvertIfCoordinatesNotClear() {
     String noArtifact = getDependency("group", null, "1.0", "runtime", null);
     configureFromFileText("pom.xml", noArtifact);
-
     selectWholeFile();
-
     performCut();
-
     configureGradleFile();
-    performPaste();
-    checkResultByText(null, "dependencies {\n" +
-                            "    <dependency>\n" +
-                            "    <groupId>group</groupId>\n" +
-                            "    <version>1.0</version>\n" +
-                            "    <scope>runtime</scope>\n" +
-                            "    </dependency>\n" +
-                            "}", true);
+    int old = CodeInsightSettings.getInstance().REFORMAT_ON_PASTE;
+    try {
+      CodeInsightSettings.getInstance().REFORMAT_ON_PASTE = CodeInsightSettings.NO_REFORMAT;
+      performPaste();
+      checkResultByText(null, "dependencies {\n" +
+                              "    <dependency>\n" +
+                              "<groupId>group</groupId>\n" +
+                              "<version>1.0</version>\n" +
+                              "<scope>runtime</scope>\n" +
+                              "</dependency>\n" +
+                              "}", true);
+    }
+    finally {
+      CodeInsightSettings.getInstance().REFORMAT_ON_PASTE = old;
+    }
   }
 
   public void test_AddCompile() {
@@ -95,13 +104,24 @@ public class MvnDependencyPasteTest extends LightJavaCodeInsightTestCase {
   private void performCut() {
     EditorActionManager actionManager = EditorActionManager.getInstance();
     EditorActionHandler actionHandler = actionManager.getActionHandler(IdeActions.ACTION_EDITOR_CUT);
-    actionHandler.execute(getEditor(), null, DataManager.getInstance().getDataContextFromFocus().getResultSync());
+    actionHandler.execute(getEditor(), null, getContext());
   }
 
   private void performPaste() {
     EditorActionManager actionManager = EditorActionManager.getInstance();
     EditorActionHandler actionHandler = actionManager.getActionHandler(IdeActions.ACTION_EDITOR_PASTE);
-    actionHandler.execute(getEditor(), null, DataManager.getInstance().getDataContextFromFocus().getResultSync());
+    actionHandler.execute(getEditor(), null, getContext());
+  }
+
+  @Nullable
+  private static DataContext getContext() {
+    try {
+      return DataManager.getInstance().getDataContextFromFocusAsync().blockingGet(100, TimeUnit.MILLISECONDS);
+    }
+    catch (Exception e) {
+      ExceptionUtil.rethrow(e);
+    }
+    return null;
   }
 
   @NotNull

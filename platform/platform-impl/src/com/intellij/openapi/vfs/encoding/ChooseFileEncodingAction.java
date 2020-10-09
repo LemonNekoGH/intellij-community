@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.openapi.vfs.encoding;
 
@@ -11,12 +11,10 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.project.DumbAwareAction;
-import com.intellij.openapi.util.NotNullLazyValue;
-import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.VolatileNotNullLazyValue;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.ui.IconDeferrer;
+import com.intellij.ui.IconManager;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.Function;
 import com.intellij.util.ui.EmptyIcon;
@@ -44,9 +42,9 @@ public abstract class ChooseFileEncodingAction extends ComboBoxAction {
   public abstract void update(@NotNull final AnActionEvent e);
 
   private void fillCharsetActions(@NotNull DefaultActionGroup group,
-                                  @Nullable final VirtualFile virtualFile,
+                                  @Nullable VirtualFile virtualFile,
                                   @NotNull List<? extends Charset> charsets,
-                                  @NotNull final Function<? super Charset, String> descriptionSupplier) {
+                                  @NotNull Function<? super Charset, @NlsActions.ActionDescription String> descriptionSupplier) {
     for (final Charset charset : charsets) {
       AnAction action = new CharsetAction(charset.displayName(), null, EmptyIcon.ICON_16) {
         @Override
@@ -72,7 +70,7 @@ public abstract class ChooseFileEncodingAction extends ComboBoxAction {
                 return ArrayUtilRt.EMPTY_BYTE_ARRAY;
               }
             });
-            defer = IconDeferrer.getInstance().defer(null, Pair.create(virtualFile, charset), pair -> {
+            defer = IconManager.getInstance().createDeferredIcon(null, new Pair<>(virtualFile, charset), pair -> {
               VirtualFile myFile = pair.getFirst();
               Charset charset = pair.getSecond();
               CharSequence text = myText.getValue();
@@ -117,9 +115,9 @@ public abstract class ChooseFileEncodingAction extends ComboBoxAction {
   protected abstract void chosen(@Nullable VirtualFile virtualFile, @NotNull Charset charset);
 
   @NotNull
-  protected DefaultActionGroup createCharsetsActionGroup(@Nullable String clearItemText,
+  protected DefaultActionGroup createCharsetsActionGroup(@Nullable @NlsActions.ActionText String clearItemText,
                                                          @Nullable Charset alreadySelected,
-                                                         @NotNull Function<? super Charset, String> descriptionSupplier) {
+                                                         @NotNull Function<? super Charset, @NlsActions.ActionDescription String> descriptionSupplier) {
     DefaultActionGroup group = new DefaultActionGroup();
     List<Charset> favorites = new ArrayList<>(EncodingManager.getInstance().getFavorites());
     Collections.sort(favorites);
@@ -152,7 +150,7 @@ public abstract class ChooseFileEncodingAction extends ComboBoxAction {
   }
 
   private abstract static class CharsetAction extends DumbAwareAction implements LightEditCompatible {
-    CharsetAction(String name, String description, Icon icon) {
+    CharsetAction(@NlsSafe String name, @NlsActions.ActionDescription String description, Icon icon) {
       super(name, description, icon);
     }
   }

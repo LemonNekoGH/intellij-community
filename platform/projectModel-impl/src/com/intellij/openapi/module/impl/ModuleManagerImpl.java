@@ -14,6 +14,7 @@ import com.intellij.openapi.components.ProjectComponent;
 import com.intellij.openapi.components.impl.stores.IComponentStore;
 import com.intellij.openapi.components.impl.stores.ModuleStore;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.*;
 import com.intellij.openapi.progress.*;
 import com.intellij.openapi.progress.util.ProgressWrapper;
@@ -52,9 +53,9 @@ import org.jetbrains.annotations.SystemIndependent;
 import org.jetbrains.jps.model.serialization.JpsProjectLoader;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
@@ -223,7 +224,8 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
     myModulePathsToLoad.clear();
   }
 
-  protected void unloadNewlyAddedModulesIfPossible(@NotNull Set<ModulePath> modulesToLoad, @NotNull List<UnloadedModuleDescriptionImpl> modulesToUnload) {
+  @Override
+  public void unloadNewlyAddedModulesIfPossible(@NotNull Set<ModulePath> modulesToLoad, @NotNull List<UnloadedModuleDescriptionImpl> modulesToUnload) {
   }
 
   @NotNull
@@ -356,9 +358,9 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
     showUnknownModuleTypeNotification(modulesWithUnknownTypes);
   }
 
-  private static @NotNull Module loadModuleInternal(@NotNull Path filePath, @NotNull ModuleManagerImpl manager) throws IOException {
+  private static @NotNull Module loadModuleInternal(@NotNull Path file, @NotNull ModuleManagerImpl manager) throws IOException {
     // we cannot call refreshAndFindFileByPath during module init under read action because it is forbidden
-    String systemIndependentPath = filePath.toString().replace(File.separatorChar, '/');
+    String systemIndependentPath = file.toString().replace(File.separatorChar, '/');
     VirtualFile virtualFile = StandardFileSystems.local().refreshAndFindFileByPath(systemIndependentPath);
     if (virtualFile != null) {
       // otherwise virtualFile.contentsToByteArray() will query expensive FileTypeManager.getInstance()).getByFile()
@@ -366,7 +368,7 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
     }
     return ReadAction.compute(() -> {
       ModuleEx module = manager.createAndLoadModule(systemIndependentPath);
-      initModule(module, () -> ((ModuleStore)module.getService(IComponentStore.class)).setPath(filePath, virtualFile, false));
+      initModule(module, () -> ((ModuleStore)module.getService(IComponentStore.class)).setPath(file, virtualFile, false));
       return module;
     });
   }
@@ -562,14 +564,24 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
   @NotNull
   public Module loadModule(@NotNull String filePath) throws IOException, ModuleWithNameAlreadyExists {
     incModificationCount();
-    final ModifiableModuleModel modifiableModel = getModifiableModel();
-    final Module module = modifiableModel.loadModule(filePath);
+    ModifiableModuleModel modifiableModel = getModifiableModel();
+    Module module = modifiableModel.loadModule(filePath);
     modifiableModel.commit();
     return module;
   }
 
   @Override
-  public void disposeModule(@NotNull final Module module) {
+  @NotNull
+  public Module loadModule(@NotNull Path file) throws IOException, ModuleWithNameAlreadyExists {
+    incModificationCount();
+    ModifiableModuleModel modifiableModel = getModifiableModel();
+    Module module = modifiableModel.loadModule(file);
+    modifiableModel.commit();
+    return module;
+  }
+
+  @Override
+  public void disposeModule(@NotNull Module module) {
     ApplicationManager.getApplication().runWriteAction(() -> {
       final ModifiableModuleModel modifiableModel = getModifiableModel();
       modifiableModel.disposeModule(module);
@@ -866,8 +878,7 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
       }
     }
 
-    @Nullable
-    private ModuleEx getModuleByFilePath(@NotNull @SystemIndependent String filePath) {
+    private @Nullable ModuleEx getModuleByFilePath(@NotNull @SystemIndependent String filePath) {
       for (Module module : getModules()) {
         if (SystemInfo.isFileSystemCaseSensitive ? module.getModuleFilePath().equals(filePath) : module.getModuleFilePath().equalsIgnoreCase(filePath)) {
           return (ModuleEx)module;
@@ -877,23 +888,28 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
     }
 
     @Override
-    public @NotNull Module loadModule(@NotNull @SystemIndependent String filePath) throws IOException {
+    public Module loadModule(@NotNull Path file) throws IOException {
       assertWritable();
-      String resolvedPath = FileUtilRt.toSystemIndependentName(resolveShortWindowsName(filePath));
+      Path normalizedPath = file.toAbsolutePath().normalize();
       try {
-        Module module = getModuleByFilePath(resolvedPath);
+        Module module = getModuleByFilePath(FileUtilRt.toSystemIndependentName(normalizedPath.toString()));
         if (module == null) {
-          module = loadModuleInternal(Paths.get(resolvedPath), myManager);
+          module = loadModuleInternal(normalizedPath, myManager);
           addModule(module);
         }
         return module;
       }
-      catch (FileNotFoundException e) {
+      catch (NoSuchFileException e) {
         throw e;
       }
       catch (IOException e) {
-        throw new IOException(ProjectModelBundle.message("module.corrupted.file.error", FileUtilRt.toSystemDependentName(resolvedPath), e.getMessage()), e);
+        throw new IOException(ProjectModelBundle.message("module.corrupted.file.error", normalizedPath.toString(), e.getMessage()), e);
       }
+    }
+
+    @Override
+    public @NotNull Module loadModule(@NotNull @SystemIndependent String filePath) throws IOException {
+      return loadModule(Paths.get(resolveShortWindowsName(filePath)));
     }
 
     private void addModule(@NotNull Module module) {
@@ -1199,8 +1215,9 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
       }
     }
     List<ModulePath> oldFailedPaths = new ArrayList<>(myFailedModulePaths);
-    myModulePathsToLoad = toLoad.values().stream().map(
-      UnloadedModuleDescriptionImpl::getModulePath).collect(Collectors.toCollection(LinkedHashSet::new));
+    myModulePathsToLoad = toLoad.values().stream()
+      .map(UnloadedModuleDescriptionImpl::getModulePath)
+      .collect(Collectors.toCollection(LinkedHashSet::new));
     loadModules((ModuleModelImpl)model);
     ApplicationManager.getApplication().runWriteAction(model::commit);
     myFailedModulePaths.addAll(oldFailedPaths);

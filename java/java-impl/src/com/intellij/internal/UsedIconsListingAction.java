@@ -1,8 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-
-/*
- * @author max
- */
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.internal;
 
 import com.intellij.ide.highlighter.XmlFileType;
@@ -42,7 +38,7 @@ public class UsedIconsListingAction extends AnAction {
     final MultiMap<String, PsiExpression> calls = new MultiMap<>();
 
     final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
-    Processor<PsiReference> consumer = new Processor<PsiReference>() {
+    Processor<PsiReference> consumer = new Processor<>() {
       @Override
       public boolean process(PsiReference reference) {
         PsiCallExpression call = PsiTreeUtil.getParentOfType(reference.getElement(), PsiCallExpression.class, false);
@@ -117,7 +113,7 @@ public class UsedIconsListingAction extends AnAction {
         }
       },
 
-      new Processor<PsiFile>() {
+      new Processor<>() {
         @Override
         public boolean process(PsiFile file) {
           file.accept(new XmlRecursiveElementVisitor() {

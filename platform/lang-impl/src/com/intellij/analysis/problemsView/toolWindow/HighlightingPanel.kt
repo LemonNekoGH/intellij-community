@@ -8,7 +8,6 @@ import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.ToggleOptionAction.Option
 import com.intellij.openapi.application.ApplicationManager.getApplication
-import com.intellij.openapi.application.Experiments
 import com.intellij.openapi.application.ModalityState.stateForComponent
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorMarkupModel
@@ -18,50 +17,46 @@ import com.intellij.openapi.fileEditor.*
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.SingleAlarm
-import com.intellij.util.ui.tree.TreeUtil.promiseSelectFirstLeaf
+import com.intellij.util.ui.tree.TreeUtil
 import javax.swing.Icon
 
 internal class HighlightingPanel(project: Project, state: ProblemsViewState)
-  : ProblemsViewPanel(project, state), FileEditorManagerListener, PowerSaveMode.Listener {
+  : ProblemsViewPanel(project, state, ProblemsViewBundle.messagePointer("problems.view.highlighting")),
+    FileEditorManagerListener, PowerSaveMode.Listener {
 
   private val statusUpdateAlarm = SingleAlarm(Runnable(this::updateStatus), 200, stateForComponent(this), this)
   private var previousStatus: Status? = null
 
   init {
     tree.showsRootHandles = false
+    updateCurrentFile()
     project.messageBus.connect(this)
       .subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, this)
     getApplication().messageBus.connect(this)
       .subscribe(PowerSaveMode.TOPIC, this)
   }
 
-  override fun getDisplayName() = ProblemsViewBundle.message("problems.view.highlighting")
   override fun getSortFoldersFirst(): Option? = null
   override fun getTreeExpander(): TreeExpander? = null
 
   override fun getData(dataId: String): Any? {
-    val root = treeModel.root as? HighlightingFileRoot
-    if (CommonDataKeys.VIRTUAL_FILE.`is`(dataId)) return root?.file
+    if (CommonDataKeys.VIRTUAL_FILE.`is`(dataId)) return currentFile
     return super.getData(dataId)
   }
 
   override fun getToolWindowIcon(count: Int): Icon? {
-    if (Experiments.getInstance().isFeatureEnabled("problems.view.project.errors.enabled")) return null
-    val problem = (treeModel.root as? HighlightingFileRoot)?.getChildren()?.any {
+    if (ProblemsView.isProjectErrorsEnabled()) return null
+    val root = currentRoot ?: return Toolwindows.ToolWindowProblemsEmpty
+    val problem = root.getChildren(root.file).any {
       val severity = (it as? ProblemNode)?.severity
       severity != null && severity >= HighlightSeverity.ERROR.myVal
     }
-    return if (problem == true) Toolwindows.ToolWindowProblems else Toolwindows.ToolWindowProblemsEmpty
+    return if (problem) Toolwindows.ToolWindowProblems else Toolwindows.ToolWindowProblemsEmpty
   }
 
   override fun selectionChangedTo(selected: Boolean) {
     super.selectionChangedTo(selected)
     if (selected) updateCurrentFile()
-  }
-
-  fun selectHighlighter(highlighter: RangeHighlighterEx) {
-    val root = treeModel.root as? HighlightingFileRoot
-    root?.findProblemNode(highlighter)?.let { select(it) }
   }
 
   override fun powerSaveStateChanged() {
@@ -74,18 +69,30 @@ internal class HighlightingPanel(project: Project, state: ProblemsViewState)
   override fun selectionChanged(event: FileEditorManagerEvent) = updateCurrentFile()
 
   private fun updateCurrentFile() {
-    val file = findCurrentFile()
-    val root = treeModel.root as? HighlightingFileRoot
-    if (file == null) {
-      if (root == null) return
-      treeModel.root = null
+    currentFile = findCurrentFile()
+  }
+
+  val currentRoot
+    get() = treeModel.root as? HighlightingFileRoot
+
+  var currentFile
+    get() = currentRoot?.file
+    set(file) {
+      if (file == null) {
+        if (currentRoot == null) return
+        treeModel.root = null
+      }
+      else {
+        if (currentRoot?.file == file) return
+        treeModel.root = HighlightingFileRoot(this, file)
+        TreeUtil.promiseSelectFirstLeaf(tree)
+      }
+      powerSaveStateChanged()
     }
-    else {
-      if (root != null && root.file == file) return
-      treeModel.root = HighlightingFileRoot(this, file)
-      promiseSelectFirstLeaf(tree)
-    }
-    powerSaveStateChanged()
+
+  fun selectHighlighter(highlighter: RangeHighlighterEx) {
+    val problem = currentRoot?.findProblem(highlighter) ?: return
+    TreeUtil.promiseSelect(tree, ProblemNodeFinder(problem))
   }
 
   private fun findCurrentFile(): VirtualFile? {
@@ -108,13 +115,12 @@ internal class HighlightingPanel(project: Project, state: ProblemsViewState)
   }
 
   private fun getCurrentStatus(): Status {
-    val root = treeModel.root as? HighlightingFileRoot
-    val file = root?.file ?: return Status(ProblemsViewBundle.message("problems.view.highlighting.no.selected.file"))
+    val file = currentFile ?: return Status(ProblemsViewBundle.message("problems.view.highlighting.no.selected.file"))
     if (PowerSaveMode.isEnabled()) return Status(ProblemsViewBundle.message("problems.view.highlighting.power.save.mode"))
     val document = ProblemsView.getDocument(project, file) ?: return statusAnalyzing(file)
     val editor = EditorFactory.getInstance().editors(document, project).findFirst().orElse(null) ?: return statusAnalyzing(file)
     val model = editor.markupModel as? EditorMarkupModel ?: return statusAnalyzing(file)
-    val status = model.errorStripeRenderer?.getStatus(editor) ?: return statusAnalyzing(file)
+    val status = model.errorStripeRenderer?.status ?: return statusComplete(file)
     return when (status.analyzingType) {
       AnalyzingType.SUSPENDED -> Status(status.title, status.details, request = true)
       AnalyzingType.COMPLETE -> statusComplete(file, state.hideBySeverity.isNotEmpty())
@@ -132,7 +138,7 @@ internal class HighlightingPanel(project: Project, state: ProblemsViewState)
     return Status(title, request = true)
   }
 
-  private fun statusComplete(file: VirtualFile, filtered: Boolean): Status {
+  private fun statusComplete(file: VirtualFile, filtered: Boolean = false): Status {
     val title = ProblemsViewBundle.message("problems.view.highlighting.problems.not.found", file.name)
     if (filtered) {
       val details = ProblemsViewBundle.message("problems.view.highlighting.problems.not.found.filter")

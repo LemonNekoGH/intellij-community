@@ -26,6 +26,7 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.util.ui.FormBuilder
 import com.jetbrains.python.PyBundle
+import com.jetbrains.python.PySdkBundle
 import com.jetbrains.python.packaging.PyCondaPackageService
 import com.jetbrains.python.sdk.PyDetectedSdk
 import com.jetbrains.python.sdk.associateWithModule
@@ -45,7 +46,8 @@ class PyAddExistingCondaEnvPanel(private val project: Project?,
                                  private val module: Module?,
                                  private val existingSdks: List<Sdk>,
                                  override var newProjectPath: String?,
-                                 context: UserDataHolder) : PyAddSdkPanel() {
+                                 context: UserDataHolder,
+                                 onEnvsDetectionComplete: (() -> Boolean)? = null) : PyAddSdkPanel() {
   override val panelName: String get() = PyBundle.message("python.add.sdk.panel.name.existing.environment")
   override val icon: Icon = PythonIcons.Python.Anaconda
   private val sdkComboBox = PySdkPathChoosingComboBox()
@@ -74,13 +76,13 @@ class PyAddExistingCondaEnvPanel(private val project: Project?,
 
     layout = BorderLayout()
     val formPanel = FormBuilder.createFormBuilder()
-      .addLabeledComponent(PyBundle.message("interpreter"), sdkComboBox)
+      .addLabeledComponent(PySdkBundle.message("python.interpreter.label"), sdkComboBox)
       .addLabeledComponent(PyBundle.message("python.sdk.conda.path"), condaPathField)
       .addComponent(makeSharedField)
       .panel
     add(formPanel, BorderLayout.NORTH)
-    addInterpretersAsync(sdkComboBox) {
-      detectCondaEnvs(module, existingSdks, context)
+    addInterpretersAsync(sdkComboBox, { detectCondaEnvs(module, existingSdks, context) }) {
+      onEnvsDetectionComplete?.invoke()
     }
   }
 
@@ -90,9 +92,9 @@ class PyAddExistingCondaEnvPanel(private val project: Project?,
     val text = condaPathField.text
     val file = File(text)
     val message = when {
-      StringUtil.isEmptyOrSpaces(text) -> "Conda executable path is empty"
-      !file.exists() -> "Conda executable not found"
-      !file.isFile || !file.canExecute() -> "Conda executable path is not an executable file"
+      StringUtil.isEmptyOrSpaces(text) -> PyBundle.message("python.add.sdk.conda.executable.path.is.empty")
+      !file.exists() -> PyBundle.message("python.add.sdk.conda.executable.not.found")
+      !file.isFile || !file.canExecute() -> PyBundle.message("python.add.sdk.conda.executable.path.is.not.executable")
       else -> return null
     }
     return ValidationInfo(message)

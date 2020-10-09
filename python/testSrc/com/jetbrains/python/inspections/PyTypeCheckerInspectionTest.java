@@ -1090,8 +1090,8 @@ public class PyTypeCheckerInspectionTest extends PyInspectionTestCase {
                          "movie2 = Movie2()\n" +
                          "s: str = movie['address'][0]\n" +
                          "s: str = movie2['address'][0]\n" +
-                         "s: str = movie['address'][<warning descr=\"Unexpected type(s):(str)Possible types:(int)(slice)\">'i'</warning>]\n" +
-                         "s2: str = movie2['address'][<warning descr=\"Unexpected type(s):(str)Possible types:(int)(slice)\">'i'</warning>]\n"));
+                         "s: str = movie['address'][<warning descr=\"Unexpected type(s):(str)Possible type(s):(int)(slice)\">'i'</warning>]\n" +
+                         "s2: str = movie2['address'][<warning descr=\"Unexpected type(s):(str)Possible type(s):(int)(slice)\">'i'</warning>]\n"));
   }
 
   // PY-36008
@@ -1175,5 +1175,84 @@ public class PyTypeCheckerInspectionTest extends PyInspectionTestCase {
       assertNotNull(((PsiFileImpl)foreignFilePsi).getTreeElement());
       configureInspection();
     });
+  }
+
+  // PY-42205
+  public void testNonReferenceCallee() {
+    runWithLanguageLevel(
+      LanguageLevel.getLatest(),
+      () -> doTestByText("class CallableTest:\n" +
+                         "    def __call__(self, arg=None):\n" +
+                         "        pass\n" +
+                         "CallableTest()(\"bad 1\")")
+    );
+  }
+
+  // PY-37876
+  public void testGenericCallablesInGenericClasses() {
+    runWithLanguageLevel(
+      LanguageLevel.getLatest(),
+      () -> doTestByText("from typing import Iterable, TypeVar, Generic\n" +
+                         "T = TypeVar(\"T\")\n" +
+                         "class MyClass(Generic[T]):\n" +
+                         "    def __init__(self, data: Iterable[T]):\n" +
+                         "        sorted(data, key=self.my_func)\n" +
+                         "    def my_func(self, elem: T) -> int:\n" +
+                         "        pass")
+    );
+  }
+
+  // PY-37876
+  public void testBoundedGenericParameterOfExpectedCallableParameter1() {
+    runWithLanguageLevel(
+      LanguageLevel.getLatest(),
+      () -> doTestByText("from typing import Callable, TypeVar\n" +
+                         "\n" +
+                         "T = TypeVar('T', bound=int)\n" +
+                         "\n" +
+                         "def func(c: Callable[[T], None]):\n" +
+                         "    pass\n" +
+                         "\n" +
+                         "def accepts_anything(x: object) -> None:\n" +
+                         "    pass\n" +
+                         "\n" +
+                         "func(accepts_anything)\n")
+    );
+  }
+
+  // PY-37876
+  public void testBoundedGenericParameterOfExpectedCallableParameter2() {
+    runWithLanguageLevel(
+      LanguageLevel.getLatest(),
+      () -> doTestByText("from typing import Callable, TypeVar\n" +
+                         "\n" +
+                         "T = TypeVar('T', bound=int)\n" +
+                         "\n" +
+                         "def func(c: Callable[[T], None]):\n" +
+                         "    pass\n" +
+                         "\n" +
+                         "def accepts_anything(x: str) -> None:\n" +
+                         "    pass\n" +
+                         "\n" +
+                         "func(<weak_warning descr=\"Expected type '(Any) -> None' (matched generic type '(T) -> None'), got '(x: str) -> None' instead\">accepts_anything</weak_warning>)\n")
+    );
+  }
+
+  // PY-37876
+  public void testGenericParameterOfExpectedCallableMappedByOtherArgument() {
+    runWithLanguageLevel(
+      LanguageLevel.getLatest(),
+      () -> doTestByText("from typing import Callable, TypeVar\n" +
+                         "\n" +
+                         "T = TypeVar('T')\n" +
+                         "\n" +
+                         "def func(x: T, c: Callable[[T], None]) -> None:\n" +
+                         "    pass\n" +
+                         "\n" +
+                         "def accepts_anything(x: str) -> None:\n" +
+                         "    pass\n" +
+                         "\n" +
+                         "func(42, <weak_warning descr=\"Expected type '(int) -> None' (matched generic type '(T) -> None'), got '(x: str) -> None' instead\">accepts_anything</weak_warning>)")
+    );
   }
 }

@@ -2,6 +2,7 @@
 package com.intellij.ide.plugins;
 
 import com.intellij.openapi.extensions.PluginId;
+import com.intellij.openapi.util.NlsSafe;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -24,7 +25,7 @@ public final class PluginNode implements IdeaPluginDescriptor {
   private boolean licenseOptional;
   private String version;
   private String vendor;
-  private String description;
+  private @NlsSafe String description;
   private String sinceBuild;
   private String untilBuild;
   private String changeNotes;
@@ -178,7 +179,7 @@ public final class PluginNode implements IdeaPluginDescriptor {
     return description;
   }
 
-  public void setDescription(String description) {
+  public void setDescription(@NlsSafe String description) {
     this.description = description;
   }
 
@@ -217,6 +218,7 @@ public final class PluginNode implements IdeaPluginDescriptor {
   }
 
   @Override
+  @NlsSafe
   public String getDownloads() {
     return downloads;
   }
@@ -262,6 +264,9 @@ public final class PluginNode implements IdeaPluginDescriptor {
 
   public void setDate(String date) {
     this.date = Long.valueOf(date);
+  }
+  public void setDate(Long date) {
+    this.date = date;
   }
 
   public long getDate() {
@@ -377,7 +382,7 @@ public final class PluginNode implements IdeaPluginDescriptor {
     myDownloadUrl = host;
   }
 
-  public String getRepositoryName() {
+  public @NlsSafe String getRepositoryName() {
     return myRepositoryName;
   }
 

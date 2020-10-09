@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Some code is not what it seems to be!
@@ -31,6 +32,7 @@ import java.util.Set;
  * N.B. during indexing, only {@link DumbAware} providers are run.
  */
 public abstract class PsiAugmentProvider {
+  private static final Logger LOG = Logger.getInstance(PsiAugmentProvider.class);
   public static final ExtensionPointName<PsiAugmentProvider> EP_NAME = ExtensionPointName.create("com.intellij.lang.psiAugmentProvider");
   @SuppressWarnings("rawtypes")
   private /* non-static */ final Key<CachedValue<Map<Class, List>>> myCacheKey = Key.create(getClass().getName());
@@ -80,6 +82,14 @@ public abstract class PsiAugmentProvider {
   }
 
   /**
+   * @return whether this extension might infer the type for the given PSI,
+   * preferably checked in a lightweight way without actually inferring the type.
+   */
+  protected boolean canInferType(@NotNull PsiTypeElement typeElement) {
+    return inferType(typeElement) != null;
+  }
+
+  /**
    * Intercepts {@link PsiModifierList#hasModifierProperty(String)}, so that plugins can add imaginary modifiers or hide existing ones.
    */
   @NotNull
@@ -109,7 +119,16 @@ public abstract class PsiAugmentProvider {
       List<? extends Psi> augments = provider.getAugments(element, type, nameHint);
       for (Psi augment : augments) {
         if (nameHint == null || !(augment instanceof PsiNamedElement) || nameHint.equals(((PsiNamedElement)augment).getName())) {
-          result.add(augment);
+          try {
+            PsiUtilCore.ensureValid(augment);
+            result.add(augment);
+          }
+          catch (ProcessCanceledException e) {
+            throw e;
+          }
+          catch (Throwable e) {
+            LOG.error(PluginException.createByClass(e, provider.getClass()));
+          }
         }
       }
       return true;
@@ -140,6 +159,20 @@ public abstract class PsiAugmentProvider {
       else {
         return true;
       }
+    });
+
+    return result.get();
+  }
+
+  public static boolean isInferredType(@NotNull PsiTypeElement typeElement) {
+    AtomicBoolean result = new AtomicBoolean();
+
+    forEach(typeElement.getProject(), provider -> {
+      boolean canInfer = provider.canInferType(typeElement);
+      if (canInfer) {
+        result.set(true);
+      }
+      return !canInfer;
     });
 
     return result.get();

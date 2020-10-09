@@ -170,9 +170,7 @@ public class TerminalExecutionConsole implements ConsoleView, ObservableConsoleV
 
   @Override
   public void attachToProcess(@NotNull ProcessHandler processHandler) {
-    if (processHandler != null) {
-      attachToProcess(processHandler, true);
-    }
+    attachToProcess(processHandler, true);
   }
 
   /**
@@ -347,9 +345,8 @@ public class TerminalExecutionConsole implements ConsoleView, ObservableConsoleV
         @Override
         public byte[] getCode(int key, int modifiers) {
           if (key == KeyEvent.VK_ENTER && modifiers == 0 && myEnterKeyDefaultCodeEnabled) {
-            // pty4j expects \r as Enter key code
-            // https://github.com/JetBrains/pty4j/blob/0.9.4/test/com/pty4j/PtyTest.java#L54
-            return LineSeparator.CR.getSeparatorBytes();
+            PtyProcess process = getPtyProcess();
+            return process != null ? new byte[]{process.getEnterKeyCode()} : LineSeparator.CR.getSeparatorBytes();
           }
           return super.getCode(key, modifiers);
         }
@@ -364,6 +361,12 @@ public class TerminalExecutionConsole implements ConsoleView, ObservableConsoleV
       }
       return super.getData(dataId);
     }
+  }
+
+  private @Nullable PtyProcess getPtyProcess() {
+    ProcessHandlerTtyConnector phc = ObjectUtils.tryCast(myTerminalWidget.getTtyConnector(), ProcessHandlerTtyConnector.class);
+    BaseProcessHandler<?> processHandler = phc != null ? phc.getProcessHandler() : null;
+    return processHandler != null ? ObjectUtils.tryCast(processHandler.getProcess(), PtyProcess.class) : null;
   }
 
   private final class ClearAction extends DumbAwareAction {

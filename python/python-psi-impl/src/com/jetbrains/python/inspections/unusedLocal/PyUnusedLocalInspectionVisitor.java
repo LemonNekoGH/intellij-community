@@ -1,10 +1,10 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.jetbrains.python.inspections.unusedLocal;
 
-import com.google.common.collect.ImmutableMap;
 import com.intellij.codeInsight.controlflow.ControlFlowUtil;
 import com.intellij.codeInsight.controlflow.Instruction;
 import com.intellij.codeInspection.*;
+import com.intellij.codeInspection.util.InspectionMessage;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
@@ -22,9 +22,7 @@ import com.jetbrains.python.codeInsight.dataflow.scope.Scope;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.inspections.PyInspectionExtension;
 import com.jetbrains.python.inspections.PyInspectionVisitor;
-import com.jetbrains.python.inspections.quickfix.AddFieldQuickFix;
-import com.jetbrains.python.inspections.quickfix.PyRemoveParameterQuickFix;
-import com.jetbrains.python.inspections.quickfix.PyRemoveStatementQuickFix;
+import com.jetbrains.python.inspections.quickfix.*;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.*;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
@@ -36,9 +34,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
-import static com.jetbrains.python.psi.PyUtil.as;
-
-public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
+public final class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
   private final boolean myIgnoreTupleUnpacking;
   private final boolean myIgnoreLambdaParameters;
   private final boolean myIgnoreRangeIterationVariables;
@@ -62,19 +58,19 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
   }
 
   @Override
-  public void visitPyFunction(final PyFunction node) {
+  public void visitPyFunction(final @NotNull PyFunction node) {
     if (!PyiUtil.isOverload(node, myTypeEvalContext)) {
       processScope(node);
     }
   }
 
   @Override
-  public void visitPyLambdaExpression(final PyLambdaExpression node) {
+  public void visitPyLambdaExpression(final @NotNull PyLambdaExpression node) {
     processScope(node);
   }
 
   @Override
-  public void visitPyClass(PyClass node) {
+  public void visitPyClass(@NotNull PyClass node) {
     processScope(node);
   }
 
@@ -89,7 +85,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
   }
 
   @Override
-  public void visitPyStringLiteralExpression(PyStringLiteralExpression pyString) {
+  public void visitPyStringLiteralExpression(@NotNull PyStringLiteralExpression pyString) {
     final ScopeOwner owner = ScopeUtil.getScopeOwner(pyString);
     if (owner != null && !(owner instanceof PsiFile)) {
       final PsiElement instrAnchor = getControlFlowAnchorForString(pyString);
@@ -103,7 +99,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
         for (Pair<PsiElement, TextRange> pair : pairs) {
           pair.getFirst().accept(new PyRecursiveElementVisitor() {
             @Override
-            public void visitPyReferenceExpression(PyReferenceExpression expr) {
+            public void visitPyReferenceExpression(@NotNull PyReferenceExpression expr) {
               final PyExpression qualifier = expr.getQualifier();
               if (qualifier != null) {
                 qualifier.accept(this);
@@ -194,7 +190,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
       final String functionName = function.getName();
 
       final LanguageLevel level = LanguageLevel.forElement(function);
-      final ImmutableMap<String, PyNames.BuiltinDescription> builtinMethods =
+      final Map<String, PyNames.BuiltinDescription> builtinMethods =
         function.getContainingClass() != null ? PyNames.getBuiltinMethods(level) : PyNames.getModuleBuiltinMethods(level);
 
       return !PyNames.INIT.equals(functionName) && builtinMethods.containsKey(functionName);
@@ -230,7 +226,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
         else {
           startInstruction = i;
         }
-        analyzeReadsInScope(name, owner, instructions, startInstruction, as(element, PyReferenceExpression.class));
+        analyzeReadsInScope(name, owner, instructions, startInstruction, PyUtil.as(element, PyReferenceExpression.class));
       }
     }
   }
@@ -287,7 +283,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
     try {
       owner.acceptChildren(new PyRecursiveElementVisitor(){
         @Override
-        public void visitPyCallExpression(final PyCallExpression node) {
+        public void visitPyCallExpression(final @NotNull PyCallExpression node) {
           final PyExpression callee = node.getCallee();
           if (callee != null && "locals".equals(callee.getName())){
             throw new DontPerformException();
@@ -296,7 +292,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
         }
 
         @Override
-        public void visitPyFunction(final PyFunction node) {
+        public void visitPyFunction(final @NotNull PyFunction node) {
           // stop here
         }
       });
@@ -391,22 +387,65 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
           registerWarning(element, PyPsiBundle.message("INSP.unused.locals.parameter.isnot.used", name), fixes.toArray(LocalQuickFix.EMPTY_ARRAY));
         }
         else {
-          if (myIgnoreTupleUnpacking && isTupleUnpacking(element)) {
-            continue;
-          }
+          if (myIgnoreVariablesStartingWithUnderscore && element.getText().startsWith(PyNames.UNDERSCORE)) continue;
+          if (myIgnoreTupleUnpacking && isTupleUnpacking(element)) continue;
+
+          final String warningMsg = PyPsiBundle.message("INSP.unused.locals.local.variable.isnot.used", name);
+
           final PyForStatement forStatement = PyForStatementNavigator.getPyForStatementByIterable(element);
           if (forStatement != null) {
             if (!myIgnoreRangeIterationVariables || !isRangeIteration(forStatement)) {
-              registerProblem(element, PyPsiBundle.message("INSP.unused.locals.local.variable.isnot.used", name),
-                              ProblemHighlightType.LIKE_UNUSED_SYMBOL, null, new ReplaceWithWildCard());
+              registerWarning(element, warningMsg, new ReplaceWithWildCard());
             }
+            continue;
           }
-          else if (!myIgnoreVariablesStartingWithUnderscore || !name.startsWith(PyNames.UNDERSCORE)) {
-            registerWarning(element, PyPsiBundle.message("INSP.unused.locals.local.variable.isnot.used", name), new PyRemoveStatementQuickFix());
+
+          if (isComprehensionTarget(element)) {
+            registerWarning(element, warningMsg, new ReplaceWithWildCard());
+            continue;
           }
+
+          final PyExceptPart exceptPart = PyExceptPartNavigator.getPyExceptPartByTarget(element);
+          if (exceptPart != null) {
+            registerWarning(element, warningMsg, new PyRemoveExceptionTargetQuickFix());
+            continue;
+          }
+
+          final PyWithItem withItem = PsiTreeUtil.getParentOfType(element, PyWithItem.class);
+          if (withItem != null && PsiTreeUtil.isAncestor(withItem.getTarget(), element, false)) {
+            if (withItem.getTarget() == element) {
+              registerWarning(element, warningMsg, new PyRemoveWithPartQuickFix());
+            }
+            else {
+              registerWarning(element, warningMsg, new ReplaceWithWildCard());
+            }
+            continue;
+          }
+
+          // TODO: consider assignmentStatement.getRawTargets().length > 1 in PY-28782
+          final PyAssignmentStatement assignmentStatement = PsiTreeUtil.getParentOfType(element, PyAssignmentStatement.class);
+          if (assignmentStatement != null && assignmentStatement.getRawTargets().length == 1 &&
+              PsiTreeUtil.isAncestor(assignmentStatement.getLeftHandSideExpression(), element, false)) {
+            if (assignmentStatement.getLeftHandSideExpression() == element) {
+              registerWarning(element, warningMsg, new PyRemoveAssignmentStatementTargetQuickFix(), new PyRemoveStatementQuickFix());
+            }
+            else {
+              registerWarning(element, warningMsg, new ReplaceWithWildCard());
+            }
+            continue;
+          }
+
+          registerWarning(element, warningMsg);
         }
       }
     }
+  }
+
+  private static boolean isComprehensionTarget(@NotNull PsiElement element) {
+    final PyComprehensionElement comprehensionExpr = PsiTreeUtil.getParentOfType(element, PyComprehensionElement.class);
+    if (comprehensionExpr == null) return false;
+    return ContainerUtil.exists(comprehensionExpr.getForComponents(),
+                                it -> PsiTreeUtil.isAncestor(it.getIteratorVariable(), element, false));
   }
 
   private boolean isRangeIteration(@NotNull PyForStatement forStatement) {
@@ -462,7 +501,7 @@ public class PyUnusedLocalInspectionVisitor extends PyInspectionVisitor {
     return false;
   }
 
-  private void registerWarning(@NotNull final PsiElement element, final String msg, LocalQuickFix... quickfixes) {
+  private void registerWarning(@NotNull PsiElement element, @InspectionMessage String msg, LocalQuickFix @NotNull... quickfixes) {
     registerProblem(element, msg, ProblemHighlightType.LIKE_UNUSED_SYMBOL, null, quickfixes);
   }
 

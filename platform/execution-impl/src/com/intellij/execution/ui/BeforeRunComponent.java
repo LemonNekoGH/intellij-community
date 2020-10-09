@@ -13,6 +13,8 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.PossiblyDumbAware;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.Conditions;
@@ -49,16 +51,16 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget {
   private RunConfiguration myConfiguration;
 
   public BeforeRunComponent(@NotNull Disposable parentDisposable) {
-    super(new WrapLayout(FlowLayout.LEADING, 0, 0));
-    add(Box.createVerticalStrut(35));
+    super(new WrapLayout(FlowLayout.LEADING, 0, FragmentedSettingsBuilder.TAG_VGAP));
+    add(Box.createVerticalStrut(30));
 
     JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
-    myDropFirst.setBorder(JBUI.Borders.emptyTop(5));
+    myDropFirst.setBorder(JBUI.Borders.empty());
     panel.add(myDropFirst);
     panel.setPreferredSize(myDropFirst.getPreferredSize());
     add(panel);
     myDropFirst.setVisible(false);
-    JBEmptyBorder border = JBUI.Borders.empty(5, 0, 0, 5);
+    JBEmptyBorder border = JBUI.Borders.emptyRight(5);
     myAddButton = new InplaceButton(ExecutionBundle.message("run.configuration.before.run.add.task"), AllIcons.General.Add, e -> showPopup());
     myAddPanel = new JPanel();
     myAddPanel.setBorder(border);
@@ -104,16 +106,11 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget {
       if (tag.isVisible()) {
         continue;
       }
-      group.add(new AnAction(tag.myProvider.getName(), null, tag.myProvider.getIcon()) {
-        @Override
-        public void actionPerformed(@NotNull AnActionEvent e) {
-          createTask(e, tag);
-        }
-      });
+      group.add(new TagAction(tag));
     }
     ListPopup
       popup = JBPopupFactory
-      .getInstance().createActionGroupPopup(ExecutionBundle.message("add.new.run.configuration.action2.name"), group,
+      .getInstance().createActionGroupPopup(ExecutionBundle.message("add.new.before.run.task.name"), group,
                                             DataManager.getInstance().getDataContext(myAddButton), false, false, false, null,
                                             -1, Conditions.alwaysTrue());
     popup.showUnderneathOf(myAddButton);
@@ -286,8 +283,10 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget {
         @Override
         public void mouseClicked(MouseEvent e) {
           if (e.getClickCount() == 2) {
-            myProvider.configureTask(DataManager.getInstance().getDataContext(TaskButton.this), myConfiguration, myTask)
-              .onSuccess(aBoolean -> setTask(myTask));
+            if (!DumbService.isDumb(myConfiguration.getProject()) || DumbService.isDumbAware(myProvider)) {
+              myProvider.configureTask(DataManager.getInstance().getDataContext(TaskButton.this), myConfiguration, myTask)
+                .onSuccess(aBoolean -> setTask(myTask));
+            }
           }
         }
       });
@@ -302,14 +301,17 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget {
       if (myDropPlace == null) return;
       Rectangle bounds = myButton.getBounds();
       Dimension size = myDropPlace.getPreferredSize();
-      myDropPlace.setBounds(bounds.x + bounds.width + 2, bounds.y + (bounds.height - size.height)/2, size.width, size.height);
+      int gap = JBUI.scale(2);
+      setPreferredSize(new Dimension(bounds.width + size.width + 2 * gap, bounds.height));
+      myDropPlace.setBounds((int)(bounds.getMaxX() + gap), bounds.y + (bounds.height - size.height) / 2, size.width, size.height);
     }
 
     private void setTask(@Nullable BeforeRunTask<?> task) {
       myTask = task;
       setVisible(task != null);
       if (task != null) {
-        updateButton(myProvider.getDescription(task), myProvider.getTaskIcon(task));
+        updateButton(myProvider.getDescription(task), myProvider.getTaskIcon(task),
+                     !DumbService.isDumb(myConfiguration.getProject()) || DumbService.isDumbAware(myProvider));
       }
     }
 
@@ -330,6 +332,25 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget {
     @Override
     public String toString() {
       return myProvider.getName();
+    }
+  }
+
+  private class TagAction extends AnAction implements PossiblyDumbAware {
+    private final TaskButton myTag;
+
+    private TagAction(TaskButton tag) {
+      super(tag.myProvider.getName(), null, tag.myProvider.getIcon());
+      myTag = tag;
+    }
+
+    @Override
+    public void actionPerformed(@NotNull AnActionEvent e) {
+      createTask(e, myTag);
+    }
+
+    @Override
+    public boolean isDumbAware() {
+      return DumbService.isDumbAware(myTag.myProvider);
     }
   }
 }

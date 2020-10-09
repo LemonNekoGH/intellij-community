@@ -24,6 +24,7 @@ class CommunityRepositoryModules {
     "intellij.platform.vcs.dvcs",
     "intellij.platform.editor",
     "intellij.platform.externalSystem",
+    "intellij.platform.codeStyle",
     "intellij.platform.indexing",
     "intellij.platform.jps.model",
     "intellij.platform.lang",
@@ -56,6 +57,7 @@ class CommunityRepositoryModules {
     "intellij.platform.core.impl",
     "intellij.platform.diff.impl",
     "intellij.platform.editor.ex",
+    "intellij.platform.codeStyle.impl",
     "intellij.platform.indexing.impl",
     "intellij.platform.execution.impl",
     "intellij.platform.inspect",
@@ -100,7 +102,7 @@ class CommunityRepositoryModules {
     plugin("intellij.java.guiForms.designer") {
       directoryName = "uiDesigner"
       mainJarName = "uiDesigner.jar"
-      withModule("intellij.java.guiForms.jps", "jps/ui-designer-jps-plugin.jar")
+      withModule("intellij.java.guiForms.jps", "jps/java-guiForms-jps.jar", null)
     },
     plugin("intellij.properties") {
       withModule("intellij.properties.psi", "properties.jar")
@@ -110,20 +112,13 @@ class CommunityRepositoryModules {
     plugin("intellij.vcs.git") {
       withModule("intellij.vcs.git.rt", "git4idea-rt.jar", null)
     },
-    plugin("intellij.vcs.cvs") {
-      directoryName = "cvsIntegration"
-      mainJarName = "cvsIntegration.jar"
-      withModule("intellij.vcs.cvs.javacvs")
-      withModule("intellij.vcs.cvs.smartcvs")
-      withModule("intellij.vcs.cvs.core", "cvs_util.jar")
-    },
     plugin("intellij.xpath") {
       withModule("intellij.xpath.rt", "rt/xslt-rt.jar")
     },
     plugin("intellij.platform.langInjection") {
       withModule("intellij.java.langInjection", "IntelliLang.jar")
       withModule("intellij.xml.langInjection", "IntelliLang.jar")
-      withModule("intellij.java.langInjection.jps", "intellilang-jps-plugin.jar")
+      withModule("intellij.java.langInjection.jps")
       doNotCreateSeparateJarForLocalizableResources()
     },
     plugin("intellij.tasks.core") {
@@ -179,6 +174,9 @@ class CommunityRepositoryModules {
       withModule("intellij.gradle.toolingLoaderRt")
       withProjectLibrary("Gradle")
     },
+    plugin("intellij.gradle.dsl.impl") {
+      withModule("intellij.gradle.dsl")
+    },
     plugin("intellij.gradle.java") {
       withModule("intellij.gradle.jps")
     },
@@ -205,7 +203,7 @@ class CommunityRepositoryModules {
       withModule("intellij.devkit.jps")
     },
     plugin("intellij.eclipse") {
-      withModule("intellij.eclipse.jps", "eclipse-jps-plugin.jar", null)
+      withModule("intellij.eclipse.jps", "eclipse-jps.jar", null)
       withModule("intellij.eclipse.common")
     },
     plugin("intellij.java.coverage") {
@@ -213,7 +211,7 @@ class CommunityRepositoryModules {
       withProjectLibrary("JaCoCo") //todo[nik] convert to module library
     },
     plugin("intellij.errorProne") {
-      withModule("intellij.errorProne.jps", "jps/error-prone-jps-plugin.jar")
+      withModule("intellij.errorProne.jps", "jps/errorProne-jps.jar")
     },
     plugin("intellij.cucumber.java") {
       withModule("intellij.cucumber.jvmFormatter")
@@ -233,7 +231,7 @@ class CommunityRepositoryModules {
     },
     javaFXPlugin("intellij.javaFX.community"),
     plugin("intellij.terminal") {
-      withResource("resources/.zshrc", "")
+      withResource("resources/.zshenv", "")
       withResource("resources/jediterm-bash.in", "")
       withResource("resources/fish/config.fish", "fish")
     },
@@ -246,15 +244,29 @@ class CommunityRepositoryModules {
     plugin("intellij.android.smali") {
       withModule("intellij.android.smali")
     },
-    plugin("intellij.statsCollector") {
-      withModule("intellij.statsCollector.logEvents")
-      withModule("intellij.statsCollector.completionRanker")
+    plugin("intellij.completionMlRanking"),
+    plugin("intellij.completionMlRankingModels") {
+      bundlingRestrictions.includeInEapOnly = true
     },
+    plugin("intellij.statsCollector") {
+      bundlingRestrictions.includeInEapOnly = true
+    },
+    plugin("intellij.statsCollector"),
     plugin("intellij.jps.cache"),
     plugin("intellij.space") {
       withProjectLibrary("space-idea-sdk")
       withProjectLibrary("jackson-datatype-joda")
-    }
+      withProjectLibrary("ktor-server-jetty")
+      withGeneratedResources(new ResourcesGenerator() {
+        @Override
+        File generateResources(BuildContext context) {
+          def gradleRunner = context.getGradle()
+          gradleRunner.run("Download Space Automation definitions", "setupSpaceAutomationDefinitions")
+          return new File("${context.paths.communityHome}/build/dependencies/build/space")
+        }
+      }, "lib")
+    },
+    plugin("intellij.gauge")
   ]
 
   static PluginLayout androidPlugin(Map<String, String> additionalModulesToJars) {
@@ -366,6 +378,7 @@ class CommunityRepositoryModules {
       withModuleLibrary("precompiled-usb-devices", "android.sdktools.usb-devices", "")
 
       withModule("intellij.android.jps", "jps/android-jps-plugin.jar", null)
+      withModule("intellij.android.jps.model")
 
       withProjectLibrary("kxml2") //todo[nik] move to module libraries
 

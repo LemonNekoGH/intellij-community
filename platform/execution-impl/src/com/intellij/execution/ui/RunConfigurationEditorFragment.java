@@ -25,12 +25,12 @@ public abstract class RunConfigurationEditorFragment<Settings, C extends JCompon
   public abstract void applyEditorTo(@NotNull RunnerAndConfigurationSettingsImpl s);
 
   public static <Settings> SettingsEditorFragment<Settings, ?> createSettingsTag(String id, String name, String group,
-                                                                                 @NotNull Predicate<RunnerAndConfigurationSettingsImpl> getter,
-                                                                                 @NotNull BiConsumer<RunnerAndConfigurationSettingsImpl, Boolean> setter,
+                                                                                 @NotNull Predicate<? super RunnerAndConfigurationSettingsImpl> getter,
+                                                                                 @NotNull BiConsumer<? super RunnerAndConfigurationSettingsImpl, ? super Boolean> setter,
                                                                                  int menuPosition) {
     Ref<SettingsEditorFragment<?, ?>> ref = new Ref<>();
     TagButton button = new TagButton(name, () -> ref.get().setSelected(false));
-    RunConfigurationEditorFragment<Settings, ?> fragment = new RunConfigurationEditorFragment<Settings, TagButton>(id, name, group, button, 0) {
+    RunConfigurationEditorFragment<Settings, ?> fragment = new RunConfigurationEditorFragment<>(id, name, group, button, 0) {
       @Override
       protected void disposeEditor() {
         Disposer.dispose(myComponent);

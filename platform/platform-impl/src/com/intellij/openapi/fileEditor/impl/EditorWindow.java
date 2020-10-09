@@ -21,21 +21,20 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Splitter;
-import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Key;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.LayeredIcon;
 import com.intellij.ui.OnePixelSplitter;
+import com.intellij.ui.scale.JBUIScale;
+import com.intellij.ui.tabs.impl.JBTabsImpl;
 import com.intellij.ui.tabs.impl.tabsLayout.TabsLayoutInfo;
 import com.intellij.util.IconUtil;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.JBRectangle;
-import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -60,6 +59,12 @@ public final class EditorWindow {
 
   private boolean myIsDisposed;
   public static final Key<Integer> INITIAL_INDEX_KEY = Key.create("initial editor index");
+  // Metadata to support editor tab drag&drop process: initial index
+  public static final Key<Integer> DRAG_START_INDEX_KEY = KeyWithDefaultValue.create("drag start editor index", -1);
+  // Metadata to support editor tab drag&drop process: hash of source container
+  public static final Key<Integer> DRAG_START_LOCATION_HASH_KEY = KeyWithDefaultValue.create("drag start editor location hash", 0);
+  // Metadata to support editor tab drag&drop process: initial 'pinned' state
+  public static final Key<Boolean> DRAG_START_PINNED_KEY = Key.create("drag start editor pinned state");
   private final Stack<Pair<String, FileEditorOpenOptions>> myRemovedTabs = new Stack<Pair<String, FileEditorOpenOptions>>() {
     @Override
     public void push(Pair<String, FileEditorOpenOptions> pair) {
@@ -174,6 +179,7 @@ public final class EditorWindow {
             myRemovedTabs.push(pair);
             myTabbedPane.removeTabAt(componentIndex, indexToSelect, transferFocus);
             editorManager.disposeComposite(editor);
+            file.putUserData(INITIAL_INDEX_KEY, null);
           }
         }
         else {
@@ -305,7 +311,7 @@ public final class EditorWindow {
     myTabbedPane.setWaveColor(index, color);
   }
 
-  private void setTitleAt(int index, @NotNull String text) {
+  private void setTitleAt(int index, @NlsContexts.TabTitle @NotNull String text) {
     myTabbedPane.setTitleAt(index, text);
   }
 
@@ -313,7 +319,7 @@ public final class EditorWindow {
     myTabbedPane.setBackgroundColorAt(index, color);
   }
 
-  private void setToolTipTextAt(int index, @Nullable String text) {
+  private void setToolTipTextAt(int index, @Nullable @NlsContexts.Tooltip String text) {
     myTabbedPane.setToolTipTextAt(index, text);
   }
 
@@ -413,6 +419,7 @@ public final class EditorWindow {
           return myEditor.getFocusComponent();
         }
       });
+      setFocusCycleRoot(true);
     }
 
     @Override
@@ -514,6 +521,21 @@ public final class EditorWindow {
         Icon template = AllIcons.FileTypes.Text;
         EmptyIcon emptyIcon = EmptyIcon.create(template.getIconWidth(), template.getIconHeight());
         myTabbedPane.insertTab(file, emptyIcon, new TComp(this, editor), null, indexToInsert, editor);
+
+        Integer dragStartIndex = null;
+        Integer hash = file.getUserData(DRAG_START_LOCATION_HASH_KEY);
+        if (hash != null && System.identityHashCode(myTabbedPane.getTabs()) == hash.intValue()) {
+          dragStartIndex = file.getUserData(DRAG_START_INDEX_KEY);
+        }
+        if (dragStartIndex == null || dragStartIndex != index) {
+          Boolean initialPinned = file.getUserData(DRAG_START_PINNED_KEY);
+          if (initialPinned != null) {
+            editor.setPinned(initialPinned);
+          }
+        }
+        file.putUserData(DRAG_START_LOCATION_HASH_KEY, null);
+        file.putUserData(DRAG_START_INDEX_KEY, null);
+        file.putUserData(DRAG_START_PINNED_KEY, null);
         trimToSize(file, false);
         if (selectEditor) {
           setSelectedEditor(editor, focusEditor);
@@ -532,6 +554,10 @@ public final class EditorWindow {
   }
 
   public @Nullable EditorWindow split(int orientation, boolean forceSplit, @Nullable VirtualFile virtualFile, boolean focusNew) {
+    return split(orientation, forceSplit, virtualFile, focusNew, true);
+  }
+
+  public @Nullable EditorWindow split(int orientation, boolean forceSplit, @Nullable VirtualFile virtualFile, boolean focusNew, boolean fileIsSecondaryComponent) {
     checkConsistency();
     if (!splitAvailable()) {
       return null;
@@ -560,9 +586,17 @@ public final class EditorWindow {
       EditorWithProviderComposite selectedEditor = getSelectedEditor();
       panel.remove(myTabbedPane.getComponent());
       panel.add(splitter, BorderLayout.CENTER);
-      splitter.setFirstComponent(myPanel);
+      if (fileIsSecondaryComponent) {
+        splitter.setFirstComponent(myPanel);
+      } else {
+        splitter.setSecondComponent(myPanel);
+      }
       myPanel.add(myTabbedPane.getComponent(), BorderLayout.CENTER);
-      splitter.setSecondComponent(res.myPanel);
+      if (fileIsSecondaryComponent) {
+        splitter.setSecondComponent(res.myPanel);
+      } else {
+        splitter.setFirstComponent(res.myPanel);
+      }
       // open only selected file in the new splitter instead of opening all tabs
       VirtualFile file = selectedEditor.getFile();
       if (virtualFile == null) {
@@ -694,37 +728,17 @@ public final class EditorWindow {
    * @return baseIcon augmented with pin/modification status
    */
   private static Icon decorateFileIcon(@NotNull EditorComposite composite, @NotNull Icon baseIcon) {
-    int count = 1;
-
-    Icon pinIcon;
-    if (composite.isPinned()) {
-      count++;
-      pinIcon = AllIcons.Nodes.TabPin;
-    }
-    else {
-      pinIcon = null;
-    }
-
     Icon modifiedIcon;
     UISettings settings = UISettings.getInstance();
     if (settings.getMarkModifiedTabsWithAsterisk()) {
       Icon crop = IconUtil.cropIcon(AllIcons.General.Modified, new JBRectangle(3, 3, 7, 7));
       modifiedIcon = settings.getMarkModifiedTabsWithAsterisk() && composite.isModified() ? crop : new EmptyIcon(7, 7);
-      count++;
+      DecoratedTabIcon result = new DecoratedTabIcon(2, baseIcon);
+      result.setIcon(baseIcon, 0);
+      result.setIcon(modifiedIcon, 1, -modifiedIcon.getIconWidth() / 2, 0);
+      return JBUIScale.scaleIcon(result);
     }
-    else {
-      modifiedIcon = null;
-    }
-
-    if (count == 1) return baseIcon;
-
-    int i = 0;
-    DecoratedTabIcon result = new DecoratedTabIcon(count, baseIcon);
-    result.setIcon(baseIcon, i++);
-    if (pinIcon != null) result.setIcon(pinIcon, i++);
-    if (modifiedIcon != null) result.setIcon(modifiedIcon, i, -modifiedIcon.getIconWidth() / 2, 0);
-
-    return JBUI.scale(result);
+    return baseIcon;
   }
 
   private static class DecoratedTabIcon extends LayeredIcon {
@@ -875,7 +889,7 @@ public final class EditorWindow {
     boolean wasPinned = editorComposite.isPinned();
     editorComposite.setPinned(pinned);
     if (wasPinned != pinned && ApplicationManager.getApplication().isDispatchThread()) {
-      updateFileIconDecoration(file);
+      ObjectUtils.consumeIfCast(getTabbedPane().getTabs(), JBTabsImpl.class, JBTabsImpl::doLayout);
     }
   }
 

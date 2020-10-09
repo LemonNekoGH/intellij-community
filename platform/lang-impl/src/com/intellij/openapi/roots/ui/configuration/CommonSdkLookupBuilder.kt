@@ -6,13 +6,12 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.projectRoots.SdkType
 import com.intellij.openapi.util.NlsContexts.ProgressTitle
-import org.jetbrains.annotations.Nls
 
 internal data class CommonSdkLookupBuilder(
   override val project: Project? = null,
 
-  @Nls
-  override val progressMessageTitle: @ProgressTitle String? = null,
+  @ProgressTitle
+  override val progressMessageTitle: String? = null,
   override val progressIndicator: ProgressIndicator? = null,
 
   override val sdkName: String? = null,
@@ -36,7 +35,7 @@ internal data class CommonSdkLookupBuilder(
   override fun withProject(project: Project?) =
     copy(project = project)
 
-  override fun withProgressMessageTitle(@Nls message: @ProgressTitle String) =
+  override fun withProgressMessageTitle(@ProgressTitle message: String) =
     copy(progressMessageTitle = message)
 
   override fun withSdkName(name: String) =
@@ -70,10 +69,16 @@ internal data class CommonSdkLookupBuilder(
     copy(onDownloadableSdkSuggested = handler)
 
   override fun onSdkResolved(handler: (Sdk?) -> Unit) =
-    copy(onSdkResolved = handler)
+    copy(onSdkResolved = this.onSdkResolved + handler)
 
-  override fun onSdkNameResolved(callback: (Sdk?) -> Unit) =
-    copy(onSdkNameResolved = callback)
+  override fun onSdkNameResolved(handler: (Sdk?) -> Unit) =
+    copy(onSdkNameResolved = this.onSdkNameResolved + handler)
 
   override fun executeLookup() = lookup(this)
+
+  @JvmName("plusTUnit")
+  private operator fun <T> ( (T) -> Unit).plus(v : (T) -> Unit) : (T) -> Unit = {
+    this(it)
+    v(it)
+  }
 }

@@ -31,7 +31,16 @@ public abstract class SerializationManagerEx extends SerializationManager {
 
   public abstract boolean isNameStorageCorrupted();
 
-  public abstract void repairNameStorage();
+  public abstract void repairNameStorage(@NotNull Exception corruptionCause);
+
+  /**
+   * @deprecated use {@link SerializationManagerEx#repairNameStorage(Exception)}
+   * with specified corruption cause
+   */
+  @Deprecated
+  public void repairNameStorage() {
+    repairNameStorage(new Exception());
+  }
 
   public abstract void flushNameStorage();
 

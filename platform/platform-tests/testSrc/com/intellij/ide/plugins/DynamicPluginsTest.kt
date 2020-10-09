@@ -470,12 +470,20 @@ class DynamicPluginsTest {
     assertThat(app.getService(MyPersistentComponent::class.java)).isNotNull()
 
     val pluginDescriptor = PluginManagerCore.getPlugin(PluginId.getId(pluginBuilder.id))!!
-    val success = PluginEnabler.updatePluginEnabledState(null, emptyList(), listOf(pluginDescriptor), null)
+    val success = PluginEnabler.enablePlugins(
+      null,
+      listOf(pluginDescriptor),
+      false
+    )
     assertThat(success).isTrue()
     assertThat(pluginDescriptor.isEnabled).isFalse()
     assertThat(app.getService(MyPersistentComponent::class.java)).isNull()
 
-    assertThat(PluginEnabler.updatePluginEnabledState(null, listOf(pluginDescriptor), emptyList(), null)).isTrue()
+    assertThat(PluginEnabler.enablePlugins(
+      null,
+      listOf(pluginDescriptor),
+      true
+    )).isTrue()
     assertThat(pluginDescriptor.isEnabled).isTrue()
     assertThat(app.getService(MyPersistentComponent::class.java)).isNotNull()
 
@@ -491,7 +499,7 @@ class DynamicPluginsTest {
 
     val quuxDependencyDescriptor = PluginBuilder().extensions("""<barExtension key="foo" implementationClass="y"/>""", "foo")
     val barDependencyDescriptor = PluginBuilder().depends(quuxBuilder.id, "quux.xml")
-    val mainDescriptor = PluginBuilder().depends(barBuilder.id, "bar.xml")
+    val mainDescriptor = PluginBuilder().randomId("main").depends(barBuilder.id, "bar.xml")
 
     val barDisposable = loadPluginWithText(barBuilder)
     try {
@@ -503,7 +511,8 @@ class DynamicPluginsTest {
         directory.resolve("plugin.xml").write(mainDescriptor.text())
         val descriptor = loadDescriptorInTest(directory.parent)
         descriptor.setLoader(DynamicPluginsTest::class.java.classLoader)
-        assertThat(DynamicPlugins.checkCanUnloadWithoutRestart(descriptor)).isEqualTo("Plugin ${mainDescriptor.id} is not unload-safe because of extension to non-dynamic EP foo.barExtension")
+        assertThat(DynamicPlugins.checkCanUnloadWithoutRestart(descriptor)).isEqualTo(
+          "Plugin ${mainDescriptor.id} is not unload-safe because of extension to non-dynamic EP foo.barExtension in optional dependency on ${quuxBuilder.id} in optional dependency on ${barBuilder.id}")
       }
       finally {
         Disposer.dispose(quuxDisposable)
@@ -548,6 +557,43 @@ class DynamicPluginsTest {
       }
       finally {
         Disposer.dispose(quuxDisposable)
+      }
+    }
+    finally {
+      Disposer.dispose(barDisposable)
+    }
+  }
+
+  @Test
+  fun unloadNestedOptionalDependency() {
+    val barBuilder = PluginBuilder().randomId("bar")
+    val quuxBuilder = PluginBuilder().randomId("quux")
+
+    val quuxDependencyDescriptor = PluginBuilder().extensions("""<applicationService serviceImplementation="${MyPersistentComponent::class.java.name}"/>""")
+    val barDependencyDescriptor = PluginBuilder().depends(quuxBuilder.id, "quux.xml")
+    val mainDescriptor = PluginBuilder().depends(barBuilder.id, "bar.xml")
+    val barDisposable = loadPluginWithText(barBuilder)
+    try {
+      val quuxDisposable = loadPluginWithText(quuxBuilder)
+      val directory = Files.createTempDirectory(inMemoryFs.fs.getPath("/"), null).resolve("plugin/META-INF")
+      directory.resolve("bar.xml").write(barDependencyDescriptor.text(requireId = false))
+      directory.resolve("quux.xml").write(quuxDependencyDescriptor.text(requireId = false))
+      directory.resolve("plugin.xml").write(mainDescriptor.text())
+      val descriptor = loadDescriptorInTest(directory.parent)
+      descriptor.setLoader(DynamicPluginsTest::class.java.classLoader)
+      assertThat(DynamicPlugins.checkCanUnloadWithoutRestart(descriptor)).isNull()
+
+      DynamicPlugins.loadPlugin(descriptor)
+      try {
+        assertThat(ApplicationManager.getApplication().getService(MyPersistentComponent::class.java)).isNotNull()
+        Disposer.dispose(quuxDisposable)
+        assertThat(ApplicationManager.getApplication().getService(MyPersistentComponent::class.java)).isNull()
+      }
+      finally {
+        val unloadDescriptor = loadDescriptorInTest(directory.parent)
+        val canBeUnloaded = DynamicPlugins.allowLoadUnloadWithoutRestart(unloadDescriptor)
+        DynamicPlugins.unloadPlugin(unloadDescriptor)
+        assertThat(canBeUnloaded).isTrue()
       }
     }
     finally {

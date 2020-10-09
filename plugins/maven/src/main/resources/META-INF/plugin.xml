@@ -97,12 +97,13 @@
     <configurationType implementation="org.jetbrains.idea.maven.execution.MavenRunConfigurationType"/>
     <runConfigurationProducer implementation="org.jetbrains.idea.maven.execution.MavenConfigurationProducer"/>
     <orderEnumerationHandlerFactory implementation="org.jetbrains.idea.maven.execution.MavenOrderEnumeratorHandler$FactoryImpl"/>
+    <executionTargetLanguageRuntimeType implementation="org.jetbrains.idea.maven.execution.target.MavenRuntimeType" />
 
     <junitPatcher implementation="org.jetbrains.idea.maven.execution.MavenJUnitPatcher"/>
 
     <programRunner implementation="org.jetbrains.idea.maven.execution.build.DelegateBuildRunner" id="mavenDelegateBuildRunner"/>
 
-    <compileServer.plugin classpath="maven-jps-plugin.jar"/>
+    <compileServer.plugin classpath="maven-jps.jar"/>
 
     <languageInjector implementation="org.jetbrains.idea.maven.plugins.api.MavenPluginConfigurationLanguageInjector"/>
 
@@ -141,6 +142,10 @@
     <localInspection language="XML" shortName="MavenDuplicateDependenciesInspection" bundle="messages.MavenDomBundle" key="inspection.duplicate.dependencies.name"
                      groupKey="inspection.group" enabledByDefault="true" level="WARNING"
                      implementationClass="org.jetbrains.idea.maven.dom.inspections.MavenDuplicateDependenciesInspection"/>
+
+    <localInspection language="XML" shortName="MavenParentMissedVersionInspection" bundle="messages.MavenDomBundle" key="inspection.missed.parent.version"
+                     groupKey="inspection.group" enabledByDefault="true" level="ERROR"
+                     implementationClass="org.jetbrains.idea.maven.dom.inspections.MavenParentMissedVersionInspection"/>
     <localInspection language="XML" shortName="MavenDuplicatePluginInspection" bundle="messages.MavenDomBundle" key="inspection.duplicate.plugin.declaration"
                      groupKey="inspection.group" enabledByDefault="true" level="WARNING"
                      implementationClass="org.jetbrains.idea.maven.dom.inspections.MavenDuplicatePluginInspection"/>
@@ -270,7 +275,9 @@
     </intentionAction>
 
     <module.workingDirectoryProvider implementation="org.jetbrains.idea.maven.project.MavenWorkingDirectoryProvider"/>
-    <notificationAllowlist groupIds="Maven: non-managed pom.xml"/>
+    <notificationGroup id="Maven: non-managed pom.xml" displayType="BALLOON"/>
+    <notificationGroup id="Maven" displayType="BALLOON"/>
+    <toolWindowAllowlist id="Maven"/>
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij.properties">
@@ -420,6 +427,7 @@
     <compiler implementation="org.jetbrains.idea.maven.importing.MavenCompilerEclipseExtension"/>
     <executionEnvironmentProvider
       implementation="org.jetbrains.idea.maven.execution.MavenApplicationConfigurationExecutionEnvironmentProvider"/>
+
   </extensions>
   <extensions defaultExtensionNs="org.jetbrains.idea.reposearch">
     <provider implementation="org.jetbrains.idea.maven.onlinecompletion.MavenCompletionProviderFactory"/>
@@ -506,9 +514,13 @@
     </action>
 
     <action id="Maven.ShowSettings"
-            class="org.jetbrains.idea.maven.project.actions.EditSettingsAction"
-            icon="AllIcons.General.Settings">
+            class="org.jetbrains.idea.maven.project.actions.EditSettingsAction">
     </action>
+
+    <group id="Maven.ShowSettingsGroup" popup="true" icon="AllIcons.General.Settings">
+      <reference id="ExternalSystem.ShowCommonSettings"/>
+      <reference id="Maven.ShowSettings"/>
+    </group>
 
     <action id="Maven.ToggleOffline"
             class="org.jetbrains.idea.maven.project.actions.ToggleOfflineAction"
@@ -517,6 +529,10 @@
 
     <action id="Maven.ToggleLookNested"
             class="org.jetbrains.idea.maven.project.actions.LookForNestedToggleAction">
+    </action>
+
+    <action id="Maven.UseWrapperAction"
+            class="org.jetbrains.idea.maven.project.actions.UseWrapperAction">
     </action>
 
     <action id="Maven.ToggleSkipTests"
@@ -594,7 +610,7 @@
       <reference id="Maven.ToggleSkipTests"/>
       <reference id="Maven.CollapseAll"/>
       <separator/>
-      <reference id="Maven.ShowSettings"/>
+      <reference id="Maven.ShowSettingsGroup"/>
     </group>
 
     <group id="Maven.DependencyMenu">

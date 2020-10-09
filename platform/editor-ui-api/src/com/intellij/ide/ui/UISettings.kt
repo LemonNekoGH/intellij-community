@@ -9,6 +9,7 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.IconLoader
+import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.serviceContainer.NonInjectable
@@ -20,6 +21,7 @@ import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.xmlb.annotations.Transient
 import org.jetbrains.annotations.ApiStatus.ScheduledForRemoval
+import org.jetbrains.annotations.NonNls
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
@@ -29,7 +31,7 @@ import kotlin.math.roundToInt
 
 private val LOG = logger<UISettings>()
 
-@State(name = "UISettings", storages = [(Storage("ui.lnf.xml"))])
+@State(name = "UISettings", storages = [(Storage("ui.lnf.xml"))], useLoadedStateAsExisting = false)
 class UISettings @NonInjectable constructor(private val notRoamableOptions: NotRoamableUiSettings) : PersistentStateComponent<UISettingsState> {
   constructor() : this(ApplicationManager.getApplication().getService(NotRoamableUiSettings::class.java))
 
@@ -50,10 +52,10 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     }
 
   val allowMergeButtons: Boolean
-    get() = state.allowMergeButtons && Registry.`is`("ide.allow.merge.buttons")
+    get() = Registry.`is`("ide.allow.merge.buttons", true)
 
   val animateWindows: Boolean
-    get() = Registry.`is`("ide.animate.toolwindows")
+    get() = Registry.`is`("ide.animate.toolwindows", false)
 
   @Deprecated("use StatusBarWidgetSettings#isEnabled(MemoryUsagePanel.WIDGET_ID)")
   var showMemoryIndicator: Boolean
@@ -81,7 +83,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     }
 
   val hideNavigationOnFocusLoss: Boolean
-    get() = Registry.`is`("ide.hide.navigation.on.focus.loss")
+    get() = Registry.`is`("ide.hide.navigation.on.focus.loss", false)
 
   var reuseNotModifiedTabs: Boolean
     get() = state.reuseNotModifiedTabs
@@ -132,7 +134,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     get() = state.closeTabButtonOnTheRight
 
   val cycleScrolling: Boolean
-    get() = Registry.`is`("ide.cycle.scrolling")
+    get() = Registry.`is`("ide.cycle.scrolling", false)
 
   var navigateToPreview: Boolean
     get() = state.navigateToPreview
@@ -140,7 +142,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
       state.navigateToPreview = value
     }
 
-  var selectedTabsLayoutInfoId: String?
+  var selectedTabsLayoutInfoId: @NonNls String?
     get() = state.selectedTabsLayoutInfoId
     set(value) {
       state.selectedTabsLayoutInfoId = value
@@ -186,7 +188,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     }
 
   val showIconInQuickNavigation: Boolean
-    get() = Registry.`is`("ide.show.icons.in.quick.navigation")
+    get() = Registry.`is`("ide.show.icons.in.quick.navigation", false)
 
   var showTreeIndentGuides: Boolean
     get() = state.showTreeIndentGuides
@@ -320,7 +322,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
       state.overrideLafFonts = value
     }
 
-  var fontFace: String?
+  var fontFace: @NlsSafe String?
     get() = notRoamableOptions.state.fontFace
     set(value) {
       notRoamableOptions.state.fontFace = value
@@ -419,6 +421,18 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     set(value) {
       state.fullPathsInWindowHeader = value
     }
+
+  var mergeMainMenuWithWindowTitle: Boolean
+    get() = state.mergeMainMenuWithWindowTitle
+    set(value) {
+      state.mergeMainMenuWithWindowTitle = value
+    }
+
+  val showNewNavbarVcsGroup: Boolean
+    get() = Registry.`is`("ide.new.navbar.vcs.group", false)
+
+  val showNewToolbar: Boolean
+    get() = Registry.`is`("ide.new.navbar", false)
 
   init {
     // TODO Remove the registry keys and migration code in 2019.3
@@ -563,6 +577,11 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
       LOG.info("Loaded: fontSize=$readSize, fontScale=$readScale; restored: fontSize=$size, fontScale=$defFontScale")
       return size
     }
+
+    const val MERGE_MAIN_MENU_WITH_WINDOW_TITLE_PROPERTY = "ide.win.frame.decoration"
+    @JvmStatic
+    val mergeMainMenuWithWindowTitleOverrideValue = System.getProperty(MERGE_MAIN_MENU_WITH_WINDOW_TITLE_PROPERTY)?.toBoolean()
+    val isMergeMainMenuWithWindowTitleOverridden = mergeMainMenuWithWindowTitleOverrideValue != null
   }
 
   @Suppress("DeprecatedCallableAddReplaceWith")
@@ -642,7 +661,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
   @Suppress("DEPRECATION")
   private fun migrateOldSettings() {
     if (state.ideAAType != AntialiasingType.SUBPIXEL) {
-      editorAAType = state.ideAAType
+      ideAAType = state.ideAAType
       state.ideAAType = AntialiasingType.SUBPIXEL
     }
     if (state.editorAAType != AntialiasingType.SUBPIXEL) {
@@ -655,6 +674,10 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     if (state.moveMouseOnDefaultButton) {
       Registry.get("ide.settings.move.mouse.on.default.button").setValue(true)
       state.moveMouseOnDefaultButton = false
+    }
+    if (!state.allowMergeButtons) {
+      Registry.get("ide.allow.merge.buttons").setValue(false)
+      state.allowMergeButtons = true
     }
   }
 

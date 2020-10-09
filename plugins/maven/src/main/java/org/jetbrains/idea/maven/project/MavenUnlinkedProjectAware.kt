@@ -2,12 +2,13 @@
 package org.jetbrains.idea.maven.project
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.externalSystem.autolink.ExternalSystemProjectListener
+import com.intellij.openapi.externalSystem.autolink.ExternalSystemProjectLinkListener
 import com.intellij.openapi.externalSystem.autolink.ExternalSystemUnlinkedProjectAware
 import com.intellij.openapi.externalSystem.model.ProjectSystemId
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Pair
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
 import gnu.trove.THashSet
 import org.jetbrains.idea.maven.utils.MavenUtil
@@ -22,10 +23,12 @@ class MavenUnlinkedProjectAware : ExternalSystemUnlinkedProjectAware {
 
   override fun isLinkedProject(project: Project, externalProjectPath: String): Boolean {
     val mavenProjectsManager = MavenProjectsManager.getInstance(project)
-    return mavenProjectsManager.projects.any { FileUtil.pathsEqual(it.directory, externalProjectPath) }
+    return mavenProjectsManager.projects.any {
+      VfsUtilCore.pathEqualsTo(it.directoryFile, externalProjectPath)
+    }
   }
 
-  override fun subscribe(project: Project, listener: ExternalSystemProjectListener, parentDisposable: Disposable) {
+  override fun subscribe(project: Project, listener: ExternalSystemProjectLinkListener, parentDisposable: Disposable) {
     val mavenProjectsManager = MavenProjectsManager.getInstance(project)
     mavenProjectsManager.addProjectsTreeListener(ProjectsTreeListener(project, listener), parentDisposable)
   }
@@ -34,7 +37,7 @@ class MavenUnlinkedProjectAware : ExternalSystemUnlinkedProjectAware {
     MavenOpenProjectProvider().linkToExistingProject(externalProjectPath, project)
   }
 
-  private class ProjectsTreeListener(project: Project, val listener: ExternalSystemProjectListener) : MavenProjectsTree.Listener {
+  private class ProjectsTreeListener(project: Project, val listener: ExternalSystemProjectLinkListener) : MavenProjectsTree.Listener {
     val mavenProjectsManager: MavenProjectsManager = MavenProjectsManager.getInstance(project)
     var mavenProjects = getMavenProjectPaths()
 

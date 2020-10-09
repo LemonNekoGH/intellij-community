@@ -4,6 +4,7 @@ package git4idea.branch;
 import com.intellij.dvcs.ui.RepositoryComboboxListCellRenderer;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.xml.util.XmlStringUtil;
 import git4idea.DialogManager;
@@ -83,6 +84,7 @@ public final class GitBranchIsNotFullyMergedDialog extends DialogWrapper {
   }
 
   @NotNull
+  @NlsContexts.Label
   private String makeDescription(@NotNull GitRepository repository) {
     String baseBranch = myBaseBranches.get(repository);
     String description;
@@ -112,7 +114,7 @@ public final class GitBranchIsNotFullyMergedDialog extends DialogWrapper {
     });
 
     JPanel repoSelectorPanel = new JPanel(new BorderLayout());
-    JBLabel label = new JBLabel(GitBundle.message("branch.not.fully.merged.dialog.repository.label"));
+    JBLabel label = new JBLabel(GitBundle.message("branch.not.fully.merged.dialog.repository.label") + " ");
     label.setLabelFor(repoSelectorPanel);
     repoSelectorPanel.add(label, BorderLayout.WEST);
     repoSelectorPanel.add(repositorySelector);

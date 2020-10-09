@@ -6,6 +6,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.rename.AutomaticRenamingDialog;
@@ -13,6 +14,7 @@ import com.intellij.ui.*;
 import com.intellij.ui.components.panels.ValidatingComponent;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -104,7 +106,7 @@ public class AutomaticUsageRenamingDialog<T> extends DialogWrapper {
   }
 
   @Nullable
-  private String getErrorText(T element) {
+  private @NlsContexts.Tooltip String getErrorText(T element) {
     return isChecked(element) ? myRenamer.getErrorText(element) : null;
   }
 
@@ -191,6 +193,7 @@ public class AutomaticUsageRenamingDialog<T> extends DialogWrapper {
         T element = getElements().get(row);
         String errorText = getErrorText(element);
         setToolTipText(errorText);
+        //noinspection HardCodedStringLiteral
         append(String.valueOf(value), highlightIfNeeded(SimpleTextAttributes.REGULAR_ATTRIBUTES, errorText));
       }
     });

@@ -42,21 +42,19 @@ import com.intellij.packaging.impl.elements.ArchivePackagingElement
 import com.intellij.pom.java.LanguageLevel
 import com.intellij.project.stateStore
 import com.intellij.testFramework.*
+import com.intellij.testFramework.rules.ProjectModelRule
 import com.intellij.util.io.*
 import com.intellij.util.ui.UIUtil
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.*
 import org.junit.Assert.assertFalse
-import org.junit.Before
-import org.junit.ClassRule
-import org.junit.Rule
-import org.junit.Test
+import org.junit.Assume.assumeTrue
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
-@RunsInActiveStoreMode
 class ExternalSystemStorageTest {
   companion object {
     @JvmField
@@ -273,6 +271,20 @@ class ExternalSystemStorageTest {
   }
 
   @Test
+  fun `load unloaded modules`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadProjectAndCheckResults("unloadedModules") { project ->
+      val unloadedModuleName = "imported"
+      val moduleManager = ModuleManager.getInstance(project)
+      val moduleDescription = moduleManager.getUnloadedModuleDescription(unloadedModuleName)
+      assertThat(moduleDescription).isNotNull
+      val contentRoots = moduleDescription!!.contentRoots
+      assertThat(contentRoots.size).isEqualTo(1)
+      assertThat(contentRoots[0].fileName).isEqualTo(unloadedModuleName)
+    }
+  }
+
+  @Test
   fun `load libraries`() = loadProjectAndCheckResults("libraries") { project ->
     val libraryTable = LibraryTablesRegistrar.getInstance().getLibraryTable(project)
     runInEdtAndWait {
@@ -313,6 +325,17 @@ class ExternalSystemStorageTest {
     assertThat(regular.rootElement).isInstanceOf(ArtifactRootElement::class.java)
   }
 
+  @Test
+  fun `mark module as mavenized`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    //after module is mavenized, we still store iml file with empty root tag inside; it would be better to delete the file in such cases,
+    // but it isn't simple to implement so let's leave it as is for now; and the old project model behaves in the same way.
+    loadModifySaveAndCheck("singleRegularModule", "singleModuleAfterMavenization") { project ->
+      val module = ModuleManager.getInstance(project).modules.single()
+      ExternalSystemModulePropertyManager.getInstance(module).setMavenized(true)
+    }
+  }
+
   @Before
   fun registerFacetType() {
     WriteAction.runAndWait<RuntimeException> {
@@ -342,7 +365,6 @@ class ExternalSystemStorageTest {
         val projectDir = project.stateStore.directoryStorePath!!.parent
         val cacheDir = ExternalProjectsDataStorage.getProjectConfigurationDir(project)
         cacheDir.delete()
-        Disposer.register(disposableRule.disposable, Disposable { cacheDir.delete() })
 
         runBlocking {
           withContext(AppUIExecutor.onWriteThread().coroutineDispatchingContext()) {
@@ -353,23 +375,41 @@ class ExternalSystemStorageTest {
               setupProject(project, projectDir)
             }
           }
-
-          project.stateStore.save()
         }
 
-        val expectedDir = tempDirManager.newPath("expectedStorage")
-        FileUtil.copyDir(testDataRoot.resolve("common").toFile(), expectedDir.toFile())
-        FileUtil.copyDir(testDataRoot.resolve(testDataDirName).toFile(), expectedDir.toFile())
-
-        projectDir.toFile().assertMatches(directoryContentOf(expectedDir.resolve("project")))
-        val expectedCacheDir = expectedDir.resolve("cache")
-        if (Files.exists(expectedCacheDir)) {
-          cacheDir.toFile().assertMatches(directoryContentOf(expectedCacheDir), FileTextMatcher.ignoreBlankLines())
-        }
-        else {
-          assertFalse("$cacheDir doesn't exist", Files.exists(cacheDir))
-        }
+        saveAndCompare(project, testDataDirName)
       }
+    }
+  }
+
+  private fun saveAndCompare(project: Project, dataDirNameToCompareWith: String) {
+    val cacheDir = ExternalProjectsDataStorage.getProjectConfigurationDir(project)
+    Disposer.register(disposableRule.disposable, Disposable { cacheDir.delete() })
+
+    runBlocking {
+      project.stateStore.save()
+    }
+
+    val expectedDir = tempDirManager.newPath("expectedStorage")
+    FileUtil.copyDir(testDataRoot.resolve("common").toFile(), expectedDir.toFile())
+    FileUtil.copyDir(testDataRoot.resolve(dataDirNameToCompareWith).toFile(), expectedDir.toFile())
+
+    val projectDir = project.stateStore.directoryStorePath!!.parent
+    projectDir.toFile().assertMatches(directoryContentOf(expectedDir.resolve("project")))
+
+    val expectedCacheDir = expectedDir.resolve("cache")
+    if (Files.exists(expectedCacheDir)) {
+      cacheDir.toFile().assertMatches(directoryContentOf(expectedCacheDir), FileTextMatcher.ignoreBlankLines())
+    }
+    else {
+      assertFalse("$cacheDir doesn't exist", Files.exists(cacheDir))
+    }
+  }
+
+  private fun loadModifySaveAndCheck(dataDirNameToLoad: String, dataDirNameToCompareWith: String, modifyProject: (Project) -> Unit) {
+    loadProjectAndCheckResults(dataDirNameToLoad) { project ->
+      modifyProject(project)
+      saveAndCompare(project, dataDirNameToCompareWith)
     }
   }
 

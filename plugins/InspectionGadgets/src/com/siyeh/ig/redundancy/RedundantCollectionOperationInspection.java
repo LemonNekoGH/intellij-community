@@ -3,7 +3,10 @@ package com.siyeh.ig.redundancy;
 
 import com.intellij.codeInsight.PsiEquivalenceUtil;
 import com.intellij.codeInspection.*;
+import com.intellij.codeInspection.util.InspectionMessage;
+import com.intellij.codeInspection.util.IntentionName;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -13,7 +16,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.callMatcher.CallMapper;
 import com.siyeh.ig.callMatcher.CallMatcher;
 import com.siyeh.ig.psiutils.*;
-import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -95,7 +98,7 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
   }
 
   interface RedundantCollectionOperationHandler {
-    default String getProblemName() {
+    default @InspectionMessage String getProblemName() {
       return InspectionGadgetsBundle.message("expression.can.be.replaced.problem.descriptor", getReplacement());
     }
 
@@ -111,7 +114,7 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
     }
 
     @NotNull
-    default String getFixName() {
+    default @IntentionName String getFixName() {
       return CommonQuickFixBundle.message("fix.replace.with.x", getReplacement());
     }
   }
@@ -241,12 +244,12 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
   }
 
   private static final class AsListToArrayHandler implements RedundantCollectionOperationHandler {
-    private final String myReplacementMethod;
+    @NonNls private final String myReplacementMethod;
     @NotNull private final SmartPsiElementPointer<PsiExpression> myArrayPtr;
     private final SmartPsiElementPointer<PsiExpression> myFromPtr;
     private final SmartPsiElementPointer<PsiExpression> myToPtr;
     @NotNull private final String mySourceComponentType;
-    @NotNull private final String myTargetComponentType;
+    @NotNull @NonNls private final String myTargetComponentType;
 
     private AsListToArrayHandler(PsiExpression from,
                                  PsiExpression to,
@@ -263,10 +266,10 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
         myReplacementMethod = "clone()";
       }
       else if (ExpressionUtils.isZero(from)) {
-        myReplacementMethod = "Arrays.copyOf";
+        myReplacementMethod = "Arrays.copyOf()";
       }
       else {
-        myReplacementMethod = "Arrays.copyOfRange";
+        myReplacementMethod = "Arrays.copyOfRange()";
       }
     }
 
@@ -294,7 +297,7 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
       PsiExpression to = myToPtr == null ? null : myToPtr.getElement();
       if ((from == null) != (to == null)) return;
       CommentTracker ct = new CommentTracker();
-      String replacement;
+      @NonNls String replacement;
       String suffix = "";
       if (!mySourceComponentType.equals(myTargetComponentType)) {
         suffix = "," + myTargetComponentType + "[].class";
@@ -362,10 +365,9 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
   }
 
   private static class ContainsAllSingletonHandler implements RedundantCollectionOperationHandler {
-    @NotNull
     @Override
-    public String getReplacement() {
-      return "contains";
+    public @NotNull @NlsSafe String getReplacement() {
+      return "contains()";
     }
 
     @Override
@@ -389,10 +391,10 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
   }
 
   private static class SingletonContainsHandler implements RedundantCollectionOperationHandler {
-    @NotNull
+
     @Override
-    public String getReplacement() {
-      return "Objects.equals";
+    public @NonNls @NotNull String getReplacement() {
+      return "Objects.equals()";
     }
 
     @Override
@@ -419,13 +421,12 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
   private static final class MapKeySetContainsHandler implements RedundantCollectionOperationHandler {
     private final String myReplacementMethod;
 
-    private MapKeySetContainsHandler(String method) {
+    private MapKeySetContainsHandler(@NonNls String method) {
       myReplacementMethod = method;
     }
 
-    @NotNull
     @Override
-    public String getReplacement() {
+    public @NonNls @NotNull String getReplacement() {
       return "Map." + myReplacementMethod + "()";
     }
 
@@ -461,13 +462,13 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
   private static class RedundantAsListForIterationHandler implements RedundantCollectionOperationHandler {
     @Override
     public String getProblemName() {
-      return "Unnecessary 'Arrays.asList' call";
+      return InspectionGadgetsBundle.message("redundant.as.list.for.iteration.problem");
     }
 
     @NotNull
     @Override
     public String getFixName() {
-      return "Unwrap";
+      return InspectionGadgetsBundle.message("redundant.as.list.for.iteration.fix.name");
     }
 
     @Override
@@ -556,9 +557,9 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
       }
     }
 
-    @NotNull
+
     @Override
-    public String getReplacement() {
+    public @NotNull @NlsSafe String getReplacement() {
       return "Arrays.sort()";
     }
 
@@ -595,9 +596,8 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
       JavaCodeStyleManager.getInstance(project).shortenClassReferences(result);
     }
 
-    @NotNull
     @Override
-    public String getReplacement() {
+    public @NotNull @NlsSafe String getReplacement() {
       return "Collections.emptyIterator()";
     }
 
@@ -616,14 +616,12 @@ public class RedundantCollectionOperationInspection extends AbstractBaseJavaLoca
       myHandler = handler;
     }
 
-    @Nls
     @NotNull
     @Override
     public String getName() {
       return myHandler.getFixName();
     }
 
-    @Nls
     @NotNull
     @Override
     public String getFamilyName() {

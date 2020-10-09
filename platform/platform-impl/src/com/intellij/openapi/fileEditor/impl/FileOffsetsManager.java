@@ -5,8 +5,8 @@ import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.text.CharArrayUtil;
-import gnu.trove.THashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -14,6 +14,7 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 
 public final class FileOffsetsManager {
@@ -22,7 +23,7 @@ public final class FileOffsetsManager {
     return ServiceManager.getService(FileOffsetsManager.class);
   }
 
-  private final Map<VirtualFile, LineOffsets> myLineOffsetsMap = new THashMap<>();
+  private final Map<VirtualFile, LineOffsets> myLineOffsetsMap = new HashMap<>();
 
   private static class LineOffsets {
     private final long myFileModificationStamp;
@@ -122,8 +123,8 @@ public final class FileOffsetsManager {
     char prev = ' ';
     int crlfCount = 0;
 
-    final IntArrayList originalLineOffsets = new IntArrayList();
-    final IntArrayList convertedLineOffsets = new IntArrayList();
+    final IntList originalLineOffsets = new IntArrayList();
+    final IntList convertedLineOffsets = new IntArrayList();
     // first line
     originalLineOffsets.add(0);
     convertedLineOffsets.add(0);

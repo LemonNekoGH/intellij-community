@@ -6,7 +6,6 @@ import com.intellij.diagnostic.StartUpMeasurer;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.scale.JBUIScale;
-import com.intellij.ui.scale.ScaleContext;
 import com.intellij.util.ImageLoader;
 import com.intellij.util.ui.JBImageIcon;
 import com.intellij.util.ui.JBInsets;
@@ -94,8 +93,9 @@ public final class Splash extends Window {
     super.dispose();
   }
 
-  private static @NotNull Image loadImage(@NotNull String path) {
-    Image result = ImageLoader.loadFromUrl(path, Splash.class, ImageLoader.ALLOW_FLOAT_SCALING, null, ScaleContext.create());
+  @NotNull
+  private static Image loadImage(@NotNull String path) {
+    Image result = SplashSlideLoader.loadImage(path);
     if (result == null) {
       throw new IllegalStateException("Cannot find image: " + path);
     }

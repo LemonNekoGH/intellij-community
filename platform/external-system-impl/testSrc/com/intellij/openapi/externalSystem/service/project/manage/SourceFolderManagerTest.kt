@@ -14,20 +14,17 @@ import com.intellij.testFramework.PlatformTestUtil
 import org.assertj.core.api.BDDAssertions.then
 import org.jetbrains.jps.model.java.JavaSourceRootType
 import java.io.File
-import java.util.concurrent.Future
 
 class SourceFolderManagerTest: HeavyPlatformTestCase() {
-
   fun `test source folder is added to content root when created`() {
     val rootManager = ModuleRootManager.getInstance(module)
-    val dir = createTempDir("contentEntry")
     val modifiableModel = rootManager.modifiableModel
-    modifiableModel.addContentEntry(VfsUtilCore.pathToUrl(dir.absolutePath))
+    modifiableModel.addContentEntry(tempDir.createVirtualDir())
     runWriteAction {
       modifiableModel.commit()
     }
 
-    val manager: SourceFolderManagerImpl = SourceFolderManager.getInstance(project) as SourceFolderManagerImpl
+    val manager = SourceFolderManager.getInstance(project) as SourceFolderManagerImpl
 
     val folderUrl = ModuleRootManager.getInstance(module).contentRootUrls[0] + "/newFolder"
     val folderFile = File(VfsUtilCore.urlToPath(folderUrl))
@@ -38,13 +35,7 @@ class SourceFolderManagerTest: HeavyPlatformTestCase() {
     FileUtil.writeToFile(file, "SomeContent")
 
     LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
-    val bulkOperationState: Future<*>? = manager.bulkOperationState
-    if (bulkOperationState == null) {
-      fail("Source Folder manager operation expected")
-    } else {
-      PlatformTestUtil.waitForFuture(bulkOperationState, 1000)
-    }
-
+    manager.consumeBulkOperationsState { PlatformTestUtil.waitForFuture(it, 1000)}
     then(rootManager.contentEntries[0].sourceFolders)
       .hasSize(1)
       .extracting("url")
@@ -66,12 +57,7 @@ class SourceFolderManagerTest: HeavyPlatformTestCase() {
     FileUtil.writeToFile(file, "SomeContent")
 
     LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
-    val bulkOperationState: Future<*>? = manager.bulkOperationState
-    if (bulkOperationState == null) {
-      fail("Source Folder manager operation expected")
-    } else {
-      PlatformTestUtil.waitForFuture(bulkOperationState, 1000)
-    }
+    manager.consumeBulkOperationsState { PlatformTestUtil.waitForFuture(it, 1000)}
 
     then(rootManager
            .contentEntries

@@ -33,10 +33,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.function.Supplier;
 
-/**
- * @author max
- */
-public class VirtualFileImpl extends VirtualFileSystemEntry {
+public final class VirtualFileImpl extends VirtualFileSystemEntry {
   VirtualFileImpl(int id, @NotNull VfsData.Segment segment, VirtualDirectoryImpl parent) {
     super(id, segment, parent);
     registerLink(getFileSystem());
@@ -167,7 +164,10 @@ public class VirtualFileImpl extends VirtualFileSystemEntry {
   @Nullable
   @Override
   public String getDetectedLineSeparator() {
-    if (getFlagInt(SYSTEM_LINE_SEPARATOR_DETECTED)) {
+    if (isDirectory()) {
+      throw new IllegalArgumentException("getDetectedLineSeparator() must not be called for a directory");
+    }
+    if (getFlagInt(VfsDataFlags.SYSTEM_LINE_SEPARATOR_DETECTED)) {
       // optimization: do not waste space in user data for system line separator
       return LineSeparator.getSystemLineSeparator().getSeparatorString();
     }
@@ -176,9 +176,12 @@ public class VirtualFileImpl extends VirtualFileSystemEntry {
 
   @Override
   public void setDetectedLineSeparator(String separator) {
+    if (isDirectory()) {
+      throw new IllegalArgumentException("setDetectedLineSeparator() must not be called for a directory");
+    }
     // optimization: do not waste space in user data for system line separator
     boolean hasSystemSeparator = LineSeparator.getSystemLineSeparator().getSeparatorString().equals(separator);
-    setFlagInt(SYSTEM_LINE_SEPARATOR_DETECTED, hasSystemSeparator);
+    setFlagInt(VfsDataFlags.SYSTEM_LINE_SEPARATOR_DETECTED, hasSystemSeparator);
 
     super.setDetectedLineSeparator(hasSystemSeparator ? null : separator);
   }
@@ -201,10 +204,11 @@ public class VirtualFileImpl extends VirtualFileSystemEntry {
   }
 
   private void checkNotTooLarge(@Nullable Object requestor) throws FileTooBigException {
-    if (!(requestor instanceof LargeFileWriteRequestor) && isTooLarge()) throw new FileTooBigException(getPath());
+    if (!(requestor instanceof LargeFileWriteRequestor) && FileUtilRt.isTooLarge(getLength())) throw new FileTooBigException(getPath());
   }
 
-  private boolean isTooLarge() {
-    return FileUtilRt.isTooLarge(getLength());
+  @Override
+  public boolean isCaseSensitive() {
+    return getParent().isCaseSensitive();
   }
 }

@@ -33,6 +33,7 @@ import org.gradle.tooling.CancellationTokenSource;
 import org.gradle.tooling.GradleConnector;
 import org.gradle.tooling.ProjectConnection;
 import org.gradle.tooling.model.build.BuildEnvironment;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.service.execution.GradleExecutionHelper;
@@ -138,6 +139,12 @@ public class GradleTaskManager implements ExternalSystemTaskManager<GradleExecut
       .orElse(false);
   }
 
+  protected static boolean isDebugAllTasks(@Nullable GradleExecutionSettings settings) {
+    return Optional.ofNullable(settings)
+      .map(s -> s.getUserData(GradleRunConfiguration.DEBUG_ALL_KEY))
+      .orElse(false);
+  }
+
   @Override
   public boolean cancelTask(@NotNull ExternalSystemTaskId id, @NotNull ExternalSystemTaskNotificationListener listener)
     throws ExternalSystemException {
@@ -231,9 +238,12 @@ public class GradleTaskManager implements ExternalSystemTaskManager<GradleExecut
       String jvmOpt = ForkedDebuggerHelper.JVM_DEBUG_SETUP_PREFIX + (isJdk9orLater ? "127.0.0.1:" : "") + gradleScriptDebugPort;
       effectiveSettings.withVmOption(jvmOpt);
     }
+    if (isDebugAllTasks(effectiveSettings)) {
+      effectiveSettings.withVmOption("-Didea.gradle.debug.all=true");
+    }
   }
 
-  private static void setupDebuggerDispatchPort(@NotNull GradleExecutionSettings effectiveSettings) {
+  public static void setupDebuggerDispatchPort(@NotNull GradleExecutionSettings effectiveSettings) {
     Integer dispatchPort = effectiveSettings.getUserData(DEBUGGER_DISPATCH_PORT_KEY);
     if (dispatchPort != null) {
       effectiveSettings.withVmOption(String.format("-D%s=%d", DISPATCH_PORT_SYS_PROP, dispatchPort));
@@ -241,7 +251,7 @@ public class GradleTaskManager implements ExternalSystemTaskManager<GradleExecut
   }
 
   public static void runCustomTask(@NotNull Project project,
-                                   @NotNull String executionName,
+                                   @NotNull @Nls String executionName,
                                    @NotNull Class<? extends Task> taskClass,
                                    @NotNull String projectPath,
                                    @NotNull String gradlePath,
@@ -252,7 +262,7 @@ public class GradleTaskManager implements ExternalSystemTaskManager<GradleExecut
   }
 
   public static void runCustomTask(@NotNull Project project,
-                                   @NotNull String executionName,
+                                   @NotNull @Nls String executionName,
                                    @NotNull Class<? extends Task> taskClass,
                                    @NotNull String projectPath,
                                    @NotNull String gradlePath,

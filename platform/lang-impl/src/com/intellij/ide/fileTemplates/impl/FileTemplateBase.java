@@ -21,7 +21,9 @@ import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.ArrayUtil;
 import org.apache.velocity.runtime.parser.ParseException;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,11 +37,14 @@ import java.util.Properties;
 public abstract class FileTemplateBase implements FileTemplate {
   static final boolean DEFAULT_REFORMAT_CODE_VALUE = true;
   static final boolean DEFAULT_ENABLED_VALUE = true;
+  static final String TEMPLATE_CHILDREN_SUFFIX = ".child.";
   @Nullable
   private String myText;
   private boolean myShouldReformatCode = DEFAULT_REFORMAT_CODE_VALUE;
   private boolean myLiveTemplateEnabled;
   private boolean myLiveTemplateEnabledChanged;
+  private String myFileName = "";
+  private FileTemplate[] myChildren = EMPTY_ARRAY;
 
   @Override
   public final boolean isReformatCode() {
@@ -57,7 +62,7 @@ public abstract class FileTemplateBase implements FileTemplate {
   }
 
   @NotNull
-  public static String getQualifiedName(@NotNull String name, @NotNull String extension) {
+  public static String getQualifiedName(@NonNls @NotNull String name, @NonNls @NotNull String extension) {
     return FTManager.encodeFileName(name, extension);
   }
 
@@ -133,4 +138,32 @@ public abstract class FileTemplateBase implements FileTemplate {
   }
 
   public boolean isLiveTemplateEnabledByDefault() { return false; }
+
+  @Override
+  public @NotNull String getFileName() {
+    return myFileName;
+  }
+
+  @Override
+  public void setFileName(@NotNull String fileName) {
+    myFileName = fileName;
+  }
+
+  @Override
+  public FileTemplate @NotNull[] getChildren() {
+    return myChildren;
+  }
+
+  @Override
+  public void setChildren(FileTemplate @NotNull[] children) {
+    myChildren = children;
+  }
+
+  public void addChild(FileTemplate child) {
+    myChildren = ArrayUtil.append(getChildren(), child);
+  }
+
+  public static boolean isChild(@NotNull FileTemplate template) {
+    return template.getName().contains(TEMPLATE_CHILDREN_SUFFIX);
+  }
 }

@@ -202,10 +202,23 @@ public abstract class ChangesTree extends Tree implements DataProvider {
     ChangesGroupingSupport result = new ChangesGroupingSupport(myProject, this, false);
 
     migrateShowFlattenSetting();
-    result.setGroupingKeysOrSkip(set(notNull(PropertiesComponent.getInstance(myProject).getValues(GROUPING_KEYS), DEFAULT_GROUPING_KEYS)));
-    result.addPropertyChangeListener(e -> changeGrouping());
+    installGroupingSupport(this, result, GROUPING_KEYS, DEFAULT_GROUPING_KEYS);
 
     return result;
+  }
+
+  protected static void installGroupingSupport(@NotNull ChangesTree tree, @NotNull ChangesGroupingSupport groupingSupport,
+                                               @NotNull @NonNls String propertyName, @NonNls String... defaultGroupingKeys) {
+    groupingSupport.setGroupingKeysOrSkip(set(notNull(PropertiesComponent.getInstance(tree.getProject()).getValues(propertyName),
+                                                      defaultGroupingKeys)));
+    groupingSupport.addPropertyChangeListener(e -> {
+      PropertiesComponent.getInstance(tree.getProject()).setValues(propertyName,
+                                                                   ArrayUtilRt.toStringArray(groupingSupport.getGroupingKeys()));
+
+      List<Object> oldSelection = selected(tree).userObjects();
+      tree.rebuildTree();
+      tree.setSelectedChanges(oldSelection);
+    });
   }
 
   private void migrateShowFlattenSetting() {
@@ -258,25 +271,25 @@ public abstract class ChangesTree extends Tree implements DataProvider {
   }
 
   @Nullable
-  public Processor<MouseEvent> getDoubleClickHandler() {
+  public Processor<? super MouseEvent> getDoubleClickHandler() {
     return myHandlers.getDoubleClickHandler();
   }
 
-  public void setDoubleClickHandler(@Nullable Processor<MouseEvent> handler) {
+  public void setDoubleClickHandler(@Nullable Processor<? super MouseEvent> handler) {
     myHandlers.setDoubleClickHandler(handler);
   }
 
   @Nullable
-  public Processor<KeyEvent> getEnterKeyHandler() {
+  public Processor<? super KeyEvent> getEnterKeyHandler() {
     return myHandlers.getEnterKeyHandler();
   }
 
-  public void setEnterKeyHandler(@Nullable Processor<KeyEvent> handler) {
+  public void setEnterKeyHandler(@Nullable Processor<? super KeyEvent> handler) {
     myHandlers.setEnterKeyHandler(handler);
   }
 
   public void installPopupHandler(ActionGroup group) {
-    PopupHandler.installUnknownPopupHandler(this, group, ActionManager.getInstance());
+    PopupHandler.installPopupHandler(this, group, ActionPlaces.UNKNOWN);
   }
 
   public JComponent getPreferredFocusedComponent() {
@@ -334,14 +347,6 @@ public abstract class ChangesTree extends Tree implements DataProvider {
     repaint();
   }
 
-  private void changeGrouping() {
-    PropertiesComponent.getInstance(myProject).setValues(GROUPING_KEYS, ArrayUtilRt.toStringArray(getGroupingSupport().getGroupingKeys()));
-
-    List<Object> oldSelection = selected(this).userObjects();
-    rebuildTree();
-    setSelectedChanges(oldSelection);
-  }
-
   private boolean isCurrentModelFlat() {
     boolean isFlat = true;
     Enumeration enumeration = getRoot().depthFirstEnumeration();
@@ -386,7 +391,7 @@ public abstract class ChangesTree extends Tree implements DataProvider {
     return myModelUpdateInProgress;
   }
 
-  protected void resetTreeState() {
+  public void resetTreeState() {
     // expanding lots of nodes is a slow operation (and result is not very useful)
     if (hasAtLeastNodes(this, 30000)) {
       TreeUtil.collapseAll(this, 1);
@@ -492,6 +497,10 @@ public abstract class ChangesTree extends Tree implements DataProvider {
     if (myTreeInclusionListener != null) myTreeInclusionListener.run();
   }
 
+  /**
+   * If called during component initialization, should be followed by {@link #resetTreeState()} or {@link #rebuildTree()}
+   * to update initial selection.
+   */
   public void setIncludedChanges(@NotNull Collection<?> changes) {
     getInclusionModel().setInclusion(changes);
   }
@@ -599,8 +608,13 @@ public abstract class ChangesTree extends Tree implements DataProvider {
     }
 
     @Override
-    public boolean isVisible(@NotNull AnActionEvent event) {
+    public boolean isExpandAllVisible() {
       return !myGroupingSupport.isNone() || !myIsModelFlat;
+    }
+
+    @Override
+    public boolean isCollapseAllVisible() {
+      return isExpandAllVisible();
     }
   }
 

@@ -18,14 +18,17 @@ import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.storage.HeavyProcessLatch;
 import com.intellij.util.ui.EDT;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Consumer;
 
 public final class RefreshQueueImpl extends RefreshQueue implements Disposable {
   private static final Logger LOG = Logger.getInstance(RefreshQueueImpl.class);
@@ -36,7 +39,7 @@ public final class RefreshQueueImpl extends RefreshQueue implements Disposable {
 
   private final ProgressIndicator myRefreshIndicator = RefreshProgress.create(IdeBundle.message("file.synchronize.progress"));
   private int myBusyThreads;
-  private final Long2ObjectOpenHashMap<RefreshSessionImpl> mySessions = new Long2ObjectOpenHashMap<>();
+  private final Long2ObjectMap<RefreshSessionImpl> mySessions = new Long2ObjectOpenHashMap<>();
   private final FrequentEventDetector myEventCounter = new FrequentEventDetector(100, 100, FrequentEventDetector.Level.WARN);
 
   public void execute(@NotNull RefreshSessionImpl session) {
@@ -64,7 +67,7 @@ public final class RefreshQueueImpl extends RefreshQueue implements Disposable {
   private void queueSession(@NotNull RefreshSessionImpl session, @NotNull ModalityState modality) {
     myQueue.execute(() -> {
       startRefreshActivity();
-      try (AccessToken ignored = HeavyProcessLatch.INSTANCE.processStarted("Doing file refresh. " + session, HeavyProcessLatch.Type.Syncing)) {
+      try (AccessToken ignored = HeavyProcessLatch.INSTANCE.processStarted(IdeBundle.message("progress.title.doing.file.refresh.0", session), HeavyProcessLatch.Type.Syncing)) {
         doScan(session);
       }
       finally {
@@ -182,5 +185,12 @@ public final class RefreshQueueImpl extends RefreshQueue implements Disposable {
         session.cancel();
       }
     }
+  }
+
+  @TestOnly
+  public static void setTestListener(@Nullable Consumer<? super VirtualFile> testListener) {
+    assert ApplicationManager.getApplication().isUnitTestMode();
+    RefreshWorker.ourTestListener = testListener;
+    LocalFileSystemRefreshWorker.setTestListener(testListener);
   }
 }

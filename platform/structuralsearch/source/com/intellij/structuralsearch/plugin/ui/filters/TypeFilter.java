@@ -1,6 +1,8 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.plugin.ui.filters;
 
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.PlainTextFileType;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
@@ -20,12 +22,13 @@ import java.util.List;
 /**
  * @author Bas Leijdekkers
  */
-class TypeFilter extends FilterAction {
+@SuppressWarnings("ComponentNotRegistered")
+public class TypeFilter extends FilterAction {
 
-  boolean showRegex;
+  boolean myShowRegex;
 
-  TypeFilter(FilterTable filterTable) {
-    super(SSRBundle.messagePointer("type.filter.name"), filterTable);
+  public TypeFilter() {
+    super(SSRBundle.messagePointer("type.filter.name"));
   }
 
   @Override
@@ -51,7 +54,7 @@ class TypeFilter extends FilterAction {
       return false;
     }
     final StructuralSearchProfile profile = myTable.getProfile();
-    showRegex = profile.isApplicableConstraint(UIUtil.TYPE_REGEX, nodes, completePattern, target);
+    myShowRegex = profile.isApplicableConstraint(UIUtil.TYPE_REGEX, nodes, completePattern, target);
     return profile.isApplicableConstraint(UIUtil.TYPE, nodes, completePattern, target);
   }
 
@@ -78,9 +81,11 @@ class TypeFilter extends FilterAction {
       private final JCheckBox myHierarchyCheckBox = new JCheckBox(SSRBundle.message("within.type.hierarchy.check.box"), false);
       private final JCheckBox myRegexCheckBox = new JCheckBox(SSRBundle.message("regex.check.box"), false);
       {
-        myRegexCheckBox.addActionListener(e -> myTextField.setFileType(myRegexCheckBox.isSelected()
-                                                                       ? RegExpFileType.INSTANCE
-                                                                       : PlainTextFileType.INSTANCE));
+        myRegexCheckBox.addActionListener(e -> {
+          final FileType fileType = myRegexCheckBox.isSelected() ? RegExpFileType.INSTANCE : PlainTextFileType.INSTANCE;
+          final Document document = UIUtil.createDocument(fileType, myTextField.getText(), myTable.getProject());
+          myTextField.setDocument(document);
+        });
       }
       private final ContextHelpLabel myHelpLabel = ContextHelpLabel.create(SSRBundle.message("type.filter.help.text"));
 
@@ -125,12 +130,12 @@ class TypeFilter extends FilterAction {
       @Override
       protected void loadValues() {
         final boolean regex = myConstraint.isRegexExprType();
-        myTextField.setFileType(showRegex && regex ? RegExpFileType.INSTANCE : PlainTextFileType.INSTANCE);
+        myTextField.setFileType(myShowRegex && regex ? RegExpFileType.INSTANCE : PlainTextFileType.INSTANCE);
         myTextField.setText((myConstraint.isInvertExprType() ? "!" : "") +
                             (regex ? myConstraint.getNameOfExprType() : myConstraint.getExpressionTypes()))  ;
         myHierarchyCheckBox.setSelected(myConstraint.isExprTypeWithinHierarchy());
-        myRegexCheckBox.setSelected(showRegex && regex);
-        myRegexCheckBox.setVisible(showRegex);
+        myRegexCheckBox.setSelected(myShowRegex && regex);
+        myRegexCheckBox.setVisible(myShowRegex);
       }
 
       @Override
@@ -140,7 +145,7 @@ class TypeFilter extends FilterAction {
         if (inverted) {
           text = text.substring(1);
         }
-        if (showRegex && myRegexCheckBox.isSelected()) {
+        if (myShowRegex && myRegexCheckBox.isSelected()) {
           myConstraint.setNameOfExprType(text);
         }
         else {

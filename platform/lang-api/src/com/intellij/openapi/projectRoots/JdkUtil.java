@@ -5,13 +5,13 @@ import com.intellij.execution.CantRunException;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.GeneralCommandLine.ParentEnvironmentType;
 import com.intellij.execution.configurations.SimpleJavaParameters;
+import com.intellij.execution.target.TargetEnvironmentAwareRunProfileState;
 import com.intellij.execution.target.TargetEnvironmentConfiguration;
 import com.intellij.execution.target.TargetEnvironmentRequest;
 import com.intellij.execution.target.TargetedCommandLineBuilder;
 import com.intellij.execution.target.local.LocalTargetEnvironment;
 import com.intellij.execution.target.local.LocalTargetEnvironmentFactory;
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.openapi.progress.EmptyProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.io.FileUtil;
@@ -31,11 +31,14 @@ public final class JdkUtil {
 
   public static final Key<JdkCommandLineSetup> COMMAND_LINE_SETUP_KEY = Key.create("com.intellij.openapi.projectRoots.JdkCommandLineSetup");
 
+  public static final Key<String> AGENT_RUNTIME_CLASSPATH = Key.create("command.line.agent.classpath");
+
   /**
    * The VM property is needed to workaround incorrect escaped URLs handling in WebSphere,
    * see <a href="https://youtrack.jetbrains.com/issue/IDEA-126859#comment=27-778948">IDEA-126859</a> for additional details
    */
   public static final String PROPERTY_DO_NOT_ESCAPE_CLASSPATH_URL = "idea.do.not.escape.classpath.url";
+  public static final String PROPERTY_DYNAMIC_CLASSPATH = "dynamic.classpath";
 
   private JdkUtil() { }
 
@@ -74,7 +77,12 @@ public final class JdkUtil {
     JavaVersion version = JavaVersion.tryParse(versionString);
     if (version == null) return null;
 
+    return suggestJdkName(version, null);
+  }
+
+  public static @NotNull String suggestJdkName(@NotNull JavaVersion version, @Nullable String vendorPrefix) {
     StringBuilder suggested = new StringBuilder();
+    if (vendorPrefix != null) suggested.append(vendorPrefix).append('-');
     if (version.feature < 9) suggested.append("1.");
     suggested.append(version.feature);
     if (version.ea) suggested.append("-ea");
@@ -135,15 +143,16 @@ public final class JdkUtil {
     LocalTargetEnvironmentFactory environmentFactory = new LocalTargetEnvironmentFactory();
     TargetEnvironmentRequest request = environmentFactory.createRequest();
     TargetedCommandLineBuilder builder = setupJVMCommandLine(javaParameters, request, null);
-    LocalTargetEnvironment environment = environmentFactory.prepareRemoteEnvironment(request, new EmptyProgressIndicator());
-    Objects.requireNonNull(builder.getUserData(COMMAND_LINE_SETUP_KEY)).provideEnvironment(environment, new EmptyProgressIndicator());
+    LocalTargetEnvironment environment = environmentFactory.prepareRemoteEnvironment(request, TargetEnvironmentAwareRunProfileState.TargetProgressIndicator.EMPTY);
+    Objects.requireNonNull(builder.getUserData(COMMAND_LINE_SETUP_KEY))
+      .provideEnvironment(environment, TargetEnvironmentAwareRunProfileState.TargetProgressIndicator.EMPTY);
     return environment.createGeneralCommandLine(builder.build());
   }
 
   public static boolean useDynamicClasspath(@Nullable Project project) {
     boolean hasDynamicProperty = Boolean.parseBoolean(System.getProperty("idea.dynamic.classpath", "false"));
     return project != null
-           ? PropertiesComponent.getInstance(project).getBoolean("dynamic.classpath", hasDynamicProperty)
+           ? PropertiesComponent.getInstance(project).getBoolean(PROPERTY_DYNAMIC_CLASSPATH, hasDynamicProperty)
            : hasDynamicProperty;
   }
 
@@ -184,7 +193,7 @@ public final class JdkUtil {
     JdkCommandLineSetup setup = new JdkCommandLineSetup(request, null);
     setup.setupCommandLine(javaParameters);
 
-    LocalTargetEnvironment environment = environmentFactory.prepareRemoteEnvironment(request, new EmptyProgressIndicator());
+    LocalTargetEnvironment environment = environmentFactory.prepareRemoteEnvironment(request, TargetEnvironmentAwareRunProfileState.TargetProgressIndicator.EMPTY);
     GeneralCommandLine generalCommandLine = environment.createGeneralCommandLine(setup.getCommandLine().build());
     commandLine.withParentEnvironmentType(javaParameters.isPassParentEnvs() ? ParentEnvironmentType.CONSOLE : ParentEnvironmentType.NONE);
     commandLine.getParametersList().addAll(generalCommandLine.getParametersList().getList());

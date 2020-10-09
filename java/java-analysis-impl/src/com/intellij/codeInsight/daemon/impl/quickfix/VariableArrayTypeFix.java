@@ -5,14 +5,15 @@ import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.intention.impl.BaseIntentionAction;
 import com.intellij.codeInspection.LocalQuickFixOnPsiElement;
-import com.intellij.ide.TypePresentationService;
-import com.intellij.lang.findUsages.LanguageFindUsages;
+import com.intellij.codeInspection.util.IntentionFamilyName;
+import com.intellij.codeInspection.util.IntentionName;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.undo.UndoUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
+import com.intellij.psi.util.JavaElementKind;
+import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -20,8 +21,8 @@ import org.jetbrains.annotations.Nullable;
 public final class VariableArrayTypeFix extends LocalQuickFixOnPsiElement {
   @NotNull
   private final PsiArrayType myTargetType;
-  private final String myName;
-  private final String myFamilyName;
+  private final @IntentionName String myName;
+  private final @IntentionFamilyName String myFamilyName;
 
   private VariableArrayTypeFix(@NotNull PsiArrayInitializerExpression initializer,
                                @NotNull PsiArrayType arrayType,
@@ -50,21 +51,7 @@ public final class VariableArrayTypeFix extends LocalQuickFixOnPsiElement {
   }
 
   private static String formatType(@NotNull PsiVariable variable) {
-    final String type = LanguageFindUsages.getType(variable);
-    if (StringUtil.isNotEmpty(type)) {
-      return type;
-    }
-
-    return TypePresentationService.getService().getTypePresentableName(variable.getClass());
-  }
-
-  private static PsiArrayInitializerExpression getInitializer(PsiArrayInitializerExpression initializer) {
-    PsiArrayInitializerExpression arrayInitializer = initializer;
-    while (arrayInitializer.getParent() instanceof PsiArrayInitializerExpression) {
-      arrayInitializer = (PsiArrayInitializerExpression)arrayInitializer.getParent();
-    }
-
-    return arrayInitializer;
+    return JavaElementKind.fromElement(variable).lessDescriptive().subject();
   }
 
   private static PsiVariable getVariableLocal(@NotNull PsiArrayInitializerExpression initializer) {
@@ -91,17 +78,7 @@ public final class VariableArrayTypeFix extends LocalQuickFixOnPsiElement {
   }
 
   private static PsiNewExpression getNewExpressionLocal(@NotNull PsiArrayInitializerExpression initializer) {
-    PsiNewExpression newExpressionLocal = null;
-
-    final PsiElement parent = initializer.getParent();
-    if (parent instanceof PsiVariable) {
-
-    }
-    else if (parent instanceof PsiNewExpression) {
-      newExpressionLocal = (PsiNewExpression)parent;
-    }
-
-    return newExpressionLocal;
+    return ObjectUtils.tryCast(initializer.getParent(), PsiNewExpression.class);
   }
 
   @Nullable

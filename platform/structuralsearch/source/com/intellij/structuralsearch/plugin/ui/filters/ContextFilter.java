@@ -20,9 +20,11 @@ import javax.swing.*;
 import java.util.Collections;
 import java.util.List;
 
-class ContextFilter extends FilterAction {
-  ContextFilter(FilterTable table) {
-    super(SSRBundle.messagePointer("context.filter.name"), table);
+@SuppressWarnings("ComponentNotRegistered")
+public class ContextFilter extends FilterAction {
+
+  public ContextFilter() {
+    super(SSRBundle.messagePointer("context.filter.name"));
   }
 
   @Override

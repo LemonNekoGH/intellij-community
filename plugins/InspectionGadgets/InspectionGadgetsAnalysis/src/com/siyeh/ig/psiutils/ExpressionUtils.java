@@ -19,7 +19,6 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.*;
 import com.intellij.util.ArrayUtil;
-import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.HardcodedMethodConstants;
 import com.siyeh.ig.callMatcher.CallMatcher;
 import one.util.streamex.StreamEx;
@@ -38,8 +37,8 @@ import java.util.stream.Stream;
 import static com.intellij.util.ObjectUtils.tryCast;
 
 public final class ExpressionUtils {
-  private static final Set<String> IMPLICIT_TO_STRING_METHOD_NAMES =
-    ContainerUtil.immutableSet("append", "format", "print", "printf", "println", "valueOf");
+  private static final @NonNls Set<String> IMPLICIT_TO_STRING_METHOD_NAMES =
+    Set.of("append", "format", "print", "printf", "println", "valueOf");
   @NonNls static final Set<String> convertableBoxedClassNames = new HashSet<>(3);
 
   static {
@@ -1032,7 +1031,7 @@ public final class ExpressionUtils {
    * @param call to rename
    * @param newName new name
    */
-  public static void bindCallTo(@NotNull PsiMethodCallExpression call, @NotNull String newName) {
+  public static void bindCallTo(@NotNull PsiMethodCallExpression call, @NotNull @NonNls String newName) {
     bindReferenceTo(call.getMethodExpression(), newName);
   }
 
@@ -1396,49 +1395,6 @@ public final class ExpressionUtils {
     return null;
   }
 
-  public static PsiExpression replacePolyadicWithParent(PsiExpression expressionToReplace,
-                                                        PsiExpression replacement) {
-    return replacePolyadicWithParent(expressionToReplace, replacement, new CommentTracker());
-  }
-
-  /**
-   * Flattens second+ polyadic's operand replaced with another polyadic expression of the same type to the parent's operands.
-   *
-   * Otherwise reparse would produce different expression.
-   *
-   * @return the updated PsiExpression (probably the parent of an expression to replace if it was necessary to update the parent);
-   * or null if no special treatment of given expression is necessary (in this case you can just call
-   * {@code tracker.replace(expressionToReplace, replacement)}.
-   */
-  @Nullable
-  public static PsiExpression replacePolyadicWithParent(PsiExpression expressionToReplace,
-                                                        PsiExpression replacement,
-                                                        CommentTracker tracker) {
-    PsiElement parent = expressionToReplace.getParent();
-    if (parent instanceof PsiPolyadicExpression && replacement instanceof PsiPolyadicExpression) {
-      PsiPolyadicExpression parentPolyadic = (PsiPolyadicExpression)parent;
-      PsiPolyadicExpression childPolyadic = (PsiPolyadicExpression)replacement;
-      IElementType parentTokenType = parentPolyadic.getOperationTokenType();
-      IElementType childTokenType = childPolyadic.getOperationTokenType();
-      if (PsiPrecedenceUtil.getPrecedenceForOperator(parentTokenType) == PsiPrecedenceUtil.getPrecedenceForOperator(childTokenType) &&
-          !PsiPrecedenceUtil.areParenthesesNeeded(childPolyadic, parentPolyadic, false)) {
-        PsiElement[] children = parentPolyadic.getChildren();
-        int idx = ArrayUtil.indexOf(children, expressionToReplace);
-        if (idx > 0 || (idx == 0 && parentTokenType == childTokenType)) {
-          StringBuilder text = new StringBuilder();
-          for (int i = 0; i < children.length; i++) {
-            PsiElement child = children[i];
-            text.append(tracker.text((i == idx) ? replacement : child));
-          }
-          PsiExpression newExpression =
-            JavaPsiFacade.getElementFactory(parent.getProject()).createExpressionFromText(text.toString(), parent);
-          return (PsiExpression)tracker.replaceAndRestoreComments(parent, newExpression);
-        }
-      }
-    }
-    return null;
-  }
-
   /**
    * Returns true if expression is evaluated in void context (i.e. its return value is not used)
    * @param expression expression to check
@@ -1606,7 +1562,7 @@ public final class ExpressionUtils {
   }
 
   private static boolean hasCharArrayParameter(PsiMethod method) {
-    final PsiParameter parameter = ArrayUtil.getFirstElement(method.getParameterList().getParameters());
+    @NonNls final PsiParameter parameter = ArrayUtil.getFirstElement(method.getParameterList().getParameters());
     return parameter == null || parameter.getType().equalsToText("char[]");
   }
 

@@ -25,19 +25,21 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import java.nio.file.FileSystems;
-import java.nio.file.Path;
-import java.nio.file.PathMatcher;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public final class JsonSchemaCatalogManager {
   static final String DEFAULT_CATALOG = "http://schemastore.org/api/json/catalog.json";
   static final String DEFAULT_CATALOG_HTTPS = "https://schemastore.azurewebsites.net/api/json/catalog.json";
+  private static final Set<String> SCHEMA_URLS_WITH_TOO_MANY_VARIANTS = Set.of(
+    "https://raw.githubusercontent.com/microsoft/azure-pipelines-vscode/master/service-schema.json"
+  );
+
   private final @NotNull Project myProject;
   private final @NotNull JsonSchemaRemoteContentProvider myRemoteContentProvider;
   private @Nullable VirtualFile myCatalog = null;
@@ -45,6 +47,8 @@ public final class JsonSchemaCatalogManager {
   private static final String NO_CACHE = "$_$_WS_NO_CACHE_$_$";
   private static final String EMPTY = "$_$_WS_EMPTY_$_$";
   private VirtualFile myTestSchemaStoreFile;
+
+  private final Map<Runnable, FileDownloadingAdapter> myDownloadingAdapters = CollectionFactory.createConcurrentWeakMap();
 
   public JsonSchemaCatalogManager(@NotNull Project project) {
     myProject = project;
@@ -91,20 +95,21 @@ public final class JsonSchemaCatalogManager {
     }
 
     String name = file.getName();
+    String schemaUrl = null;
     if (myResolvedMappings.containsKey(name)) {
-      String urlString = myResolvedMappings.get(name);
-      if (EMPTY.equals(urlString)) return null;
-      return JsonFileResolver.resolveSchemaByReference(file, urlString);
+      schemaUrl = myResolvedMappings.get(name);
+      if (EMPTY.equals(schemaUrl)) return null;
+    }
+    else if (myCatalog != null) {
+      schemaUrl = resolveSchemaFile(file, myCatalog, myProject);
+      if (NO_CACHE.equals(schemaUrl)) return null;
+      myResolvedMappings.put(name, StringUtil.notNullize(schemaUrl, EMPTY));
     }
 
-    if (myCatalog != null) {
-      String urlString = resolveSchemaFile(file, myCatalog, myProject);
-      if (NO_CACHE.equals(urlString)) return null;
-      myResolvedMappings.put(name, urlString == null ? EMPTY : urlString);
-      return JsonFileResolver.resolveSchemaByReference(file, urlString);
+    if (schemaUrl == null || SCHEMA_URLS_WITH_TOO_MANY_VARIANTS.contains(schemaUrl)) {
+      return null;
     }
-
-    return null;
+    return JsonFileResolver.resolveSchemaByReference(file, schemaUrl);
   }
 
   public List<JsonSchemaCatalogEntry> getAllCatalogEntries() {
@@ -115,7 +120,6 @@ public final class JsonSchemaCatalogManager {
     return ContainerUtil.emptyList();
   }
 
-  private final Map<Runnable, FileDownloadingAdapter> myDownloadingAdapters = CollectionFactory.createConcurrentWeakMap();
   public void registerCatalogUpdateCallback(Runnable callback) {
     if (myCatalog instanceof HttpVirtualFile) {
       RemoteFileInfo info = ((HttpVirtualFile)myCatalog).getFileInfo();
@@ -168,7 +172,13 @@ public final class JsonSchemaCatalogManager {
 
   private static @Nullable String findMatchedUrl(@NotNull List<FileMatcher> matchers, @Nullable String filePath) {
     if (filePath == null) return null;
-    Path path = Paths.get(filePath);
+    Path path;
+    try {
+      path = Paths.get(filePath);
+    }
+    catch (InvalidPathException e) {
+      return null;
+    }
     for (FileMatcher matcher : matchers) {
       if (matcher.matches(path)) {
         return matcher.myEntry.getUrl();

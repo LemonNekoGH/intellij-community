@@ -1,6 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.util;
 
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -97,23 +98,14 @@ public class TextRange implements Segment, Serializable {
   }
 
   @NotNull
+  @Contract(pure = true)
   public String substring(@NotNull String str) {
-    try {
-      return str.substring(myStartOffset, myEndOffset);
-    }
-    catch (StringIndexOutOfBoundsException e) {
-      throw new StringIndexOutOfBoundsException("Can't extract " + this + " range from '" + str + "'");
-    }
+    return str.substring(myStartOffset, myEndOffset);
   }
 
   @NotNull
   public CharSequence subSequence(@NotNull CharSequence str) {
-    try {
-      return str.subSequence(myStartOffset, myEndOffset);
-    }
-    catch (IndexOutOfBoundsException e) {
-      throw new IndexOutOfBoundsException("Can't extract " + this + " range from '" + str + "'");
-    }
+    return str.subSequence(myStartOffset, myEndOffset);
   }
 
   @NotNull
@@ -168,14 +160,9 @@ public class TextRange implements Segment, Serializable {
 
   @NotNull
   public String replace(@NotNull String original, @NotNull String replacement) {
-    try {
-      String beginning = original.substring(0, getStartOffset());
-      String ending = original.substring(getEndOffset());
-      return beginning + replacement + ending;
-    }
-    catch (StringIndexOutOfBoundsException e) {
-      throw new StringIndexOutOfBoundsException("Can't replace " + this + " range from '" + original + "' with '" + replacement + "'");
-    }
+    String beginning = original.substring(0, getStartOffset());
+    String ending = original.substring(getEndOffset());
+    return beginning + replacement + ending;
   }
 
   public boolean intersects(@NotNull TextRange textRange) {

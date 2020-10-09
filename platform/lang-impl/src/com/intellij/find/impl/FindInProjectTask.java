@@ -4,6 +4,7 @@ package com.intellij.find.impl;
 import com.intellij.find.FindBundle;
 import com.intellij.find.FindInProjectSearchEngine;
 import com.intellij.find.FindModel;
+import com.intellij.find.FindModelExtension;
 import com.intellij.find.findInProject.FindInProjectManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
@@ -108,10 +109,8 @@ class FindInProjectTask {
     try {
       myProgress.setIndeterminate(true);
       myProgress.setText(FindBundle.message("progress.text.scanning.indexed.files"));
-      Set<VirtualFile> filesForFastWordSearch = ReadAction
-        .nonBlocking(this::getFilesForFastWordSearch)
-        .withDocumentsCommitted(myProject)
-        .executeSynchronously();
+      Set<VirtualFile> filesForFastWordSearch = getFilesForFastWordSearch();
+
       myProgress.setIndeterminate(false);
       if (LOG.isDebugEnabled()) {
         LOG.debug("Searching for " + myFindModel.getStringToFind() + " in " + filesForFastWordSearch.size() + " indexed files");
@@ -265,9 +264,9 @@ class FindInProjectTask {
     SearchScope customScope = myFindModel.isCustomScope() ? myFindModel.getCustomScope() : null;
     final GlobalSearchScope globalCustomScope = customScope == null ? null : GlobalSearchScopeUtil.toGlobalSearchScope(customScope, myProject);
 
+    final Set<VirtualFile> result = new CompactVirtualFileSet();
 
     class EnumContentIterator implements ContentIterator {
-      private final Set<VirtualFile> myFiles = new CompactVirtualFileSet();
 
       @Override
       public boolean processFile(@NotNull final VirtualFile virtualFile) {
@@ -290,16 +289,11 @@ class FindInProjectTask {
             VirtualFile sourceVirtualFile = pair.second;
 
             if (sourceVirtualFile != null && !alreadySearched.contains(sourceVirtualFile)) {
-              myFiles.add(sourceVirtualFile);
+              result.add(sourceVirtualFile);
             }
           }
         });
         return true;
-      }
-
-      @NotNull
-      private Collection<VirtualFile> getFiles() {
-        return myFiles;
       }
     }
 
@@ -338,7 +332,17 @@ class FindInProjectTask {
         iterateAll(librarySources, globalCustomScope, iterator);
       }
     }
-    return iterator.getFiles();
+
+    for (FindModelExtension findModelExtension : FindModelExtension.EP_NAME.getExtensionList()) {
+      findModelExtension.iterateAdditionalFiles(myFindModel, myProject, file -> {
+        if (!alreadySearched.contains(file)) {
+          result.add(file);
+        }
+        return true;
+      });
+    }
+
+    return result;
   }
 
   private static void iterateAll(VirtualFile @NotNull [] files, @NotNull final GlobalSearchScope searchScope, @NotNull final ContentIterator iterator) {

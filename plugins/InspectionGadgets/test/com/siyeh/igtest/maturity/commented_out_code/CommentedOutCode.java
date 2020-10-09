@@ -1,4 +1,5 @@
 import java.util.*;
+import java.io.*;
 <warning descr="Commented out code (1 line)">//</warning> import java.awt.List;
 
 class CommentedOutCode /* extends Object */ {
@@ -9,6 +10,12 @@ class CommentedOutCode /* extends Object */ {
   private String s;
 
   int x(int i) {
+    new Object() {
+
+      <warning descr="Commented out code (3 lines)">/*</warning>public String toString() {
+        return "";
+        }*/
+    };
     <warning descr="Commented out code (1 line)"><caret>//</warning> System.out.println(i);
     return i + 1 /*+ 2*/;
     // https://youtrack.jetbrains.com/issue/CPP-3936 Move members dialog choses arbitrary file by name, if there are several in project
@@ -23,6 +30,16 @@ class CommentedOutCode /* extends Object */ {
   //}
   //
 
+  /*
+    List<String> tmp = map.get(s.length());
+    if(tmp == null) {
+        tmp = new ArrayList<>();
+        map.put(s.length(), tmp);
+    }
+    tmp.add(s);
+   */
+  void x(String s, String... ss) {}
+
   void k() {
     //noinspection unchecked
     l(new ArrayList());
@@ -30,13 +47,20 @@ class CommentedOutCode /* extends Object */ {
   }
   void l(List<String> l) {
     //noinspection one,two
-    System.out.println();
+    System.out.println(); // Smiles("[C+]");
     // "DROP VIEW $viewName$";
   }
 
   // TODO: change to (uri -> url)
   // uri -> path
   public String fromUri(String uri) {
+    try {
+      new FileInputStream(uri);
+    }
+    catch (FileNotFoundException e) {
+      //ignore;
+    }
+
     // was: true
     return null;
     // test
@@ -100,4 +124,13 @@ class CommentedOutCode /* extends Object */ {
   }
   */
 
+}
+enum E {
+  A {
+    <warning descr="Commented out code (3 lines)">/*</warning>
+    public String toString() {
+    return "";
+    }
+     */
+  }
 }

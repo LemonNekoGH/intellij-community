@@ -2,18 +2,22 @@
 package com.intellij.internal.statistic.envTest.scheme
 
 import com.intellij.internal.statistic.envTest.StatisticsServiceBaseTest
-import com.intellij.internal.statistic.service.fus.*
-import com.intellij.internal.statistic.service.fus.StatisticsWhitelistGroupConditions.BuildRange
-import com.intellij.internal.statistic.service.fus.StatisticsWhitelistGroupConditions.VersionRange
+import com.intellij.internal.statistic.eventLog.connection.EventLogBasicConnectionSettings
+import com.intellij.internal.statistic.eventLog.connection.metadata.EventGroupFilterRules
+import com.intellij.internal.statistic.eventLog.connection.metadata.EventGroupFilterRules.BuildRange
+import com.intellij.internal.statistic.eventLog.connection.metadata.EventGroupFilterRules.VersionRange
+import com.intellij.internal.statistic.eventLog.connection.metadata.EventGroupsFilterRules
+import com.intellij.internal.statistic.eventLog.connection.metadata.EventLogMetadataLoadException
+import com.intellij.internal.statistic.eventLog.connection.metadata.EventLogMetadataUtils
 import junit.framework.TestCase
 
-private const val USER_AGENT = "Test IntelliJ"
+private val SETTINGS = EventLogBasicConnectionSettings("Test IntelliJ")
 
 internal class EventLogMetadataServiceTest : StatisticsServiceBaseTest() {
 
   fun `test load metadata succeed`() {
     val metadataUrl = getMetadataUrl("IC.json")
-    val content = StatisticsWhitelistLoader.loadWhiteListFromServer(metadataUrl, USER_AGENT)
+    val content = EventLogMetadataUtils.loadMetadataFromServer(metadataUrl, SETTINGS)
     TestCase.assertNotNull(content)
     TestCase.assertTrue(content.isNotEmpty())
   }
@@ -22,7 +26,7 @@ internal class EventLogMetadataServiceTest : StatisticsServiceBaseTest() {
     var exception: Exception? = null
     try {
       val metadataUrl = getMetadataUrl("AB.json")
-      StatisticsWhitelistLoader.loadWhiteListFromServer(metadataUrl, USER_AGENT)
+      EventLogMetadataUtils.loadMetadataFromServer(metadataUrl, SETTINGS)
     }
     catch (e: Exception) {
       exception = e
@@ -33,31 +37,31 @@ internal class EventLogMetadataServiceTest : StatisticsServiceBaseTest() {
 
   fun `test get last modified metadata`() {
     val metadataUrl = getMetadataUrl()
-    val lastModified = StatisticsWhitelistLoader.lastModifiedWhitelist(metadataUrl, USER_AGENT)
+    val lastModified = EventLogMetadataUtils.lastModifiedMetadata(metadataUrl, SETTINGS)
     TestCase.assertEquals(1589968216000, lastModified)
   }
 
   fun `test load and parse metadata`() {
     val expected = hashMapOf(
-      "test.group" to StatisticsWhitelistGroupConditions(emptyList(), listOf(VersionRange.create("3", null))),
-      "second.test.group" to StatisticsWhitelistGroupConditions(listOf(BuildRange.create("191.12345", null)), emptyList())
+      "test.group" to EventGroupFilterRules(emptyList(), listOf(VersionRange.create("3", null))),
+      "second.test.group" to EventGroupFilterRules(listOf(BuildRange.create("191.12345", null)), emptyList())
     )
 
     val metadataUrl = getMetadataUrl()
-    val actual = StatisticsWhitelistLoader.getApprovedGroups(metadataUrl, USER_AGENT)
-    TestCase.assertEquals(StatisticsWhitelistConditions.create(expected), actual)
+    val actual = EventLogMetadataUtils.loadAndParseGroupsFilterRules(metadataUrl, SETTINGS)
+    TestCase.assertEquals(EventGroupsFilterRules.create(expected), actual)
   }
 
   fun `test failed loading and parsing metadata because url is unreachable`() {
     val metadataUrl = getMetadataUrl("AB.json")
-    val actual = StatisticsWhitelistLoader.getApprovedGroups(metadataUrl, USER_AGENT)
+    val actual = EventLogMetadataUtils.loadAndParseGroupsFilterRules(metadataUrl, SETTINGS)
     TestCase.assertNotNull(actual)
     TestCase.assertTrue(actual.isEmpty)
   }
 
   fun `test failed loading and parsing metadata because its invalid`() {
     val metadataUrl = getMetadataUrl("invalid-metadata.json")
-    val actual = StatisticsWhitelistLoader.getApprovedGroups(metadataUrl, USER_AGENT)
+    val actual = EventLogMetadataUtils.loadAndParseGroupsFilterRules(metadataUrl, SETTINGS)
     TestCase.assertNotNull(actual)
     TestCase.assertTrue(actual.isEmpty)
   }

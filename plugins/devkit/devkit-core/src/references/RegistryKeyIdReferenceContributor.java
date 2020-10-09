@@ -7,6 +7,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.lang.properties.IProperty;
 import com.intellij.lang.properties.PropertiesReferenceManager;
 import com.intellij.lang.properties.psi.PropertiesFile;
+import com.intellij.lang.properties.references.PropertyReferenceBase;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.util.registry.Registry;
@@ -19,6 +20,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xml.GenericAttributeValue;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.devkit.DevKitBundle;
 import org.jetbrains.idea.devkit.dom.Extension;
 import org.jetbrains.idea.devkit.inspections.RegistryPropertiesAnnotator;
 import org.jetbrains.uast.UExpression;
@@ -39,6 +41,11 @@ final class RegistryKeyIdReferenceContributor extends PsiReferenceContributor {
                                        .withName(string().oneOf("get", "is", "intValue", "doubleValue", "stringValue", "getColor"))
                                        .definedInClass(Registry.class.getName())),
                                      new UastInjectionHostReferenceProvider() {
+                                       @Override
+                                       public boolean acceptsTarget(@NotNull PsiElement target) {
+                                         return PropertyReferenceBase.isPropertyPsi(target);
+                                       }
+
                                        @Override
                                        public PsiReference @NotNull [] getReferencesForInjectionHost(@NotNull UExpression uExpression,
                                                                                                      @NotNull PsiLanguageInjectionHost host,
@@ -63,7 +70,7 @@ final class RegistryKeyIdReferenceContributor extends PsiReferenceContributor {
     @NotNull
     @Override
     public String getUnresolvedMessagePattern() {
-      return "Cannot resolve registry key '" + getValue() + "'";
+      return DevKitBundle.message("code.convert.registry.key.cannot.resolve", getValue());
     }
 
     @Override
@@ -98,8 +105,10 @@ final class RegistryKeyIdReferenceContributor extends PsiReferenceContributor {
         if (key == null || extension.getXmlElement() == null) return true;
 
         final boolean requireRestart = "true".equals(getAttributeValue(extension, "restartRequired"));
-        final String description = " " + StringUtil.notNullize(getAttributeValue(extension, "description"), "No Description");
-        final String defaultValue = StringUtil.notNullize(getAttributeValue(extension, "defaultValue"), "No Default");
+        final String description = " " + StringUtil.notNullize(getAttributeValue(extension, "description"),
+                                                               DevKitBundle.message("code.convert.registry.key.no.description"));
+        final String defaultValue = StringUtil.notNullize(getAttributeValue(extension, "defaultValue"),
+                                                          DevKitBundle.message("code.convert.registry.key.no.default.value"));
 
         variants.add(LookupElementBuilder.create(extension.getXmlElement(), key)
                        .withIcon(requireRestart ? AllIcons.Nodes.PluginRestart : AllIcons.Nodes.Plugin)

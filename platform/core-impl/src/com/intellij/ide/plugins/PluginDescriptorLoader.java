@@ -96,7 +96,7 @@ public final class PluginDescriptorLoader {
       }
       return descriptor;
     }
-    catch (SerializationException | InvalidDataException e) {
+    catch (SerializationException | InvalidDataException | JDOMException e) {
       if (context.isEssential) {
         ExceptionUtil.rethrow(e);
       }
@@ -355,7 +355,7 @@ public final class PluginDescriptorLoader {
       if (isUnitTestMode && result.enabledPluginCount() <= 1) {
         // we're running in unit test mode, but the classpath doesn't contain any plugins; try to load bundled plugins anyway
         context.usePluginClassLoader = true;
-        loadDescriptorsFromDir(Paths.get(context.bundledPluginsPath), /* isBundled = */ true, context);
+        loadDescriptorsFromDir(context.getBundledPluginsPath(), /* isBundled = */ true, context);
       }
     }
     catch (InterruptedException | ExecutionException e) {
@@ -381,7 +381,7 @@ public final class PluginDescriptorLoader {
     loadDescriptorsFromDir(dir, /* isBundled = */ false, context);
 
     if (context.loadBundledPlugins) {
-      loadDescriptorsFromDir(Paths.get(context.bundledPluginsPath), /* isBundled = */ true, context);
+      loadDescriptorsFromDir(context.getBundledPluginsPath(), /* isBundled = */ true, context);
     }
   }
 
@@ -476,8 +476,11 @@ public final class PluginDescriptorLoader {
   }
 
   public static @Nullable IdeaPluginDescriptorImpl tryLoadFullDescriptor(@NotNull IdeaPluginDescriptorImpl descriptor) {
+    if (descriptor.isEnabled() && !descriptor.isExtensionsCleared()) return descriptor;
+
     PathBasedJdomXIncluder.PathResolver<?> resolver = createPathResolverForPlugin(descriptor, null);
-    return PluginManager.loadDescriptor(descriptor.getPluginPath(), PluginManagerCore.PLUGIN_XML, Collections.emptySet(), descriptor.isBundled(), resolver);
+    return PluginManager
+      .loadDescriptor(descriptor.getPluginPath(), PluginManagerCore.PLUGIN_XML, Collections.emptySet(), descriptor.isBundled(), resolver);
   }
 
   static @NotNull PathBasedJdomXIncluder.PathResolver<?> createPathResolverForPlugin(@NotNull IdeaPluginDescriptorImpl descriptor,

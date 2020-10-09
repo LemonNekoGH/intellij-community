@@ -15,6 +15,7 @@ import com.intellij.openapi.keymap.impl.ui.KeymapPanel;
 import com.intellij.openapi.options.ex.Settings;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.Pair;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.TestOnly;
@@ -25,6 +26,7 @@ import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
 import org.jetbrains.idea.maven.model.MavenPlugin;
 import org.jetbrains.idea.maven.navigator.MavenProjectsStructure;
 import org.jetbrains.idea.maven.navigator.SelectMavenGoalDialog;
+import org.jetbrains.idea.maven.project.MavenConfigurableBundle;
 import org.jetbrains.idea.maven.project.MavenProject;
 import org.jetbrains.idea.maven.project.MavenProjectsManager;
 import org.jetbrains.idea.maven.utils.MavenArtifactUtil;
@@ -84,7 +86,7 @@ public final class MavenKeymapExtension implements ExternalSystemKeymapExtension
     }
 
     Icon icon = AllIcons.General.Add;
-    ((Group)result).addHyperlink(new Hyperlink(icon, "Choose a phase/goal to assign a shortcut") {
+    ((Group)result).addHyperlink(new Hyperlink(icon, MavenConfigurableBundle.message("link.label.choose.phase.goal.to.assign.shortcut")) {
       @Override
       public void onClick(MouseEvent e) {
         SelectMavenGoalDialog dialog = new SelectMavenGoalDialog(project);
@@ -196,13 +198,13 @@ public final class MavenKeymapExtension implements ExternalSystemKeymapExtension
 
   private static class MavenGoalAction extends MavenAction {
     private final MavenProject myMavenProject;
-    private final String myGoal;
+    private final @NlsSafe String myGoal;
 
     MavenGoalAction(MavenProject mavenProject, String goal) {
       myMavenProject = mavenProject;
       myGoal = goal;
       Presentation template = getTemplatePresentation();
-      template.setText(goal + " (" + mavenProject.getMavenId() + ")", false);
+      template.setText(goal + " (" + mavenProject.getMavenId() + ")", false); //NON-NLS
       template.setIcon(Task);
     }
 

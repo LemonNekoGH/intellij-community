@@ -5,10 +5,13 @@ import com.intellij.codeInspection.CommonProblemDescriptor;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.project.Project;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+
+import static org.jetbrains.annotations.Nls.Capitalization.Title;
 
 public interface CleanupInspectionUtil {
   static CleanupInspectionUtil getInstance() {
@@ -16,13 +19,13 @@ public interface CleanupInspectionUtil {
   }
 
   AbstractPerformFixesTask applyFixesNoSort(@NotNull Project project,
-                                            @NotNull String presentationText,
+                                            @NotNull @Nls(capitalization = Title) String presentationText,
                                             @NotNull List<? extends ProblemDescriptor> descriptions,
                                             @Nullable Class<?> quickfixClass,
                                             boolean startInWriteAction);
 
   default AbstractPerformFixesTask applyFixesNoSort(@NotNull Project project,
-                                                    @NotNull String presentationText,
+                                                    @NotNull @Nls(capitalization = Title) String presentationText,
                                                     @NotNull List<? extends ProblemDescriptor> descriptions,
                                                     @Nullable Class<?> quickfixClass,
                                                     boolean startInWriteAction,
@@ -31,7 +34,7 @@ public interface CleanupInspectionUtil {
   }
 
   default AbstractPerformFixesTask applyFixes(@NotNull Project project,
-                                              @NotNull String presentationText,
+                                              @NotNull @Nls(capitalization = Title) String presentationText,
                                               @NotNull List<? extends ProblemDescriptor> descriptions,
                                               @Nullable Class<?> quickfixClass,
                                               boolean startInWriteAction) {

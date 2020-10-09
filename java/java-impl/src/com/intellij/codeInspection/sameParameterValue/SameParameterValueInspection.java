@@ -72,7 +72,7 @@ public class SameParameterValueInspection extends GlobalJavaBatchInspectionTool 
 
 
     IntegerField minimalUsageCountEditor = new IntegerField(null, 1, Integer.MAX_VALUE);
-    minimalUsageCountEditor.getValueEditor().addListener(new ValueEditor.Listener<Integer>() {
+    minimalUsageCountEditor.getValueEditor().addListener(new ValueEditor.Listener<>() {
       @Override
       public void valueChanged(@NotNull Integer newValue) {
         minimalUsageCount = newValue;
@@ -216,7 +216,7 @@ public class SameParameterValueInspection extends GlobalJavaBatchInspectionTool 
                                            JavaBundle.message("inspection.same.parameter.problem.descriptor",
                                                                      name,
                                                                      StringUtil.unquoteString(shortName)),
-                                           suggestFix ? createFix(name, stringPresentation) : null,
+                                           suggestFix ? createFix(name, StringUtil.escapeLineBreak(stringPresentation)) : null,
                                            ProblemHighlightType.GENERIC_ERROR_OR_WARNING, false);
   }
 

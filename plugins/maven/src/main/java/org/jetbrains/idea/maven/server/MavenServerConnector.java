@@ -2,6 +2,7 @@
 package org.jetbrains.idea.maven.server;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.progress.EmptyProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.util.text.StringUtil;
@@ -125,7 +126,7 @@ public class MavenServerConnector implements @NotNull Disposable {
       try {
 
         console.startWrapperResolving();
-        MavenDistribution distribution = new MavenWrapperSupport().downloadAndInstallMaven(distributionUrl);
+        MavenDistribution distribution = new MavenWrapperSupport().downloadAndInstallMaven(distributionUrl, console.progressIndicatorForWrapper());
         console.finishWrapperResolving(null);
         return distribution;
       }
@@ -159,7 +160,7 @@ public class MavenServerConnector implements @NotNull Disposable {
       myMavenServer.set(myLogger, myDownloadListener, MavenRemoteObjectWrapper.ourToken);
     }
     catch (Exception e) {
-      throw new RuntimeException("Cannot start maven service", e);
+      throw new CannotStartServerException(e);
     }
   }
 

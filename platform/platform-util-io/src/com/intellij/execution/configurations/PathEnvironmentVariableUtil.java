@@ -2,11 +2,13 @@
 package com.intellij.execution.configurations;
 
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.EnvironmentUtil;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -15,6 +17,7 @@ import java.io.FileFilter;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * A collection of utility methods for working with PATH environment variable.
@@ -33,7 +36,7 @@ public final class PathEnvironmentVariableUtil {
    * @return {@link File} instance or null if not found
    */
   @Nullable
-  public static File findInPath(@NotNull String fileBaseName) {
+  public static File findInPath(@NotNull @NonNls String fileBaseName) {
     return findInPath(fileBaseName, null);
   }
 
@@ -157,5 +160,24 @@ public final class PathEnvironmentVariableUtil {
   @Nullable
   public static String getPathVariableValue() {
     return EnvironmentUtil.getValue(PATH);
+  }
+
+  /**
+   * Workaround for the problem with environment variables of macOS apps launched via GUI
+   *
+   * @see EnvironmentUtil#getEnvironmentMap Javadoc for more info
+   */
+  public static @NotNull String clarifyExePath(@NotNull String exePath) {
+    if (SystemInfoRt.isMac && exePath.indexOf(File.separatorChar) == -1) {
+      String systemPath = System.getenv("PATH");
+      String shellPath = EnvironmentUtil.getValue("PATH");
+      if (!Objects.equals(systemPath, shellPath)) {
+        File exeFile = findInPath(exePath, shellPath, null);
+        if (exeFile != null) {
+          return exeFile.getPath();
+        }
+      }
+    }
+    return exePath;
   }
 }

@@ -35,7 +35,7 @@ open class DefaultKeymap {
 
   init {
     val filterKeymaps = !ApplicationManager.getApplication().isHeadlessEnvironment
-                        //&& Registry.`is`("keymap.current.os.only")
+                        && System.getProperty("keymap.current.os.only", "true").toBoolean()
     val filteredBeans = mutableListOf<BundledKeymapBean>()
 
     var macosParentKeymapFound = false
@@ -147,7 +147,8 @@ private fun isKnownLinuxKeymap(keymapName: String?) = when (keymapName) {
 }
 
 private fun isKnownMacOSKeymap(keymapName: String?) = when (keymapName) {
-  KeymapManager.MAC_OS_X_KEYMAP, KeymapManager.MAC_OS_X_10_5_PLUS_KEYMAP,
-  "Eclipse (Mac OS X)", "Sublime Text (Mac OS X)", "Xcode", "ReSharper OSX", "Visual Studio OSX", "Visual Assist OSX", "VSCode OSX" -> true
+  KeymapManager.MAC_OS_X_KEYMAP, KeymapManager.MAC_OS_X_10_5_PLUS_KEYMAP, "macOS System Shortcuts",
+  "Eclipse (Mac OS X)", "Sublime Text (Mac OS X)", "Xcode", "ReSharper OSX",
+  "Visual Studio OSX", "Visual Assist OSX", "Visual Studio for Mac", "VSCode OSX" -> true
   else -> false
 }

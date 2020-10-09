@@ -53,7 +53,9 @@ public abstract class GeneralTestEventsProcessor implements Disposable {
 
   protected boolean myTreeBuildBeforeStart = false;
 
-  public GeneralTestEventsProcessor(Project project, @NotNull String testFrameworkName, @NotNull SMTestProxy.SMRootTestProxy testsRootProxy) {
+  public GeneralTestEventsProcessor(@NotNull Project project,
+                                    @NotNull String testFrameworkName,
+                                    @NotNull SMTestProxy.SMRootTestProxy testsRootProxy) {
     myEventPublisher = project.getMessageBus().syncPublisher(SMTRunnerEventsListener.TEST_STATUS);
     myTestFrameworkName = testFrameworkName;
     myTestsRootProxy = testsRootProxy;
@@ -67,6 +69,7 @@ public abstract class GeneralTestEventsProcessor implements Disposable {
     if (myLocator != null) {
       myTestsRootProxy.setLocator(myLocator);
     }
+    myEventPublisher.onRootPresentationAdded(myTestsRootProxy, rootName, comment, rootLocation);
   }
 
   protected SMTestProxy createProxy(String testName, String locationHint, String metaInfo, String id, String parentNodeId) {

@@ -7,6 +7,8 @@ import com.intellij.codeInsight.daemon.impl.HighlightInfoType;
 import com.intellij.codeInsight.daemon.impl.quickfix.QuickFixAction;
 import com.intellij.codeInsight.daemon.impl.quickfix.QuickFixActionRegistrarImpl;
 import com.intellij.codeInsight.intention.QuickFixFactory;
+import com.intellij.core.JavaPsiBundle;
+import com.intellij.ide.IdeBundle;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
@@ -15,6 +17,7 @@ import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.JavaVersionService;
 import com.intellij.openapi.roots.FileIndexFacade;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -30,8 +33,9 @@ import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.ig.psiutils.VariableAccessUtils;
-import gnu.trove.THashMap;
-import gnu.trove.THashSet;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenCustomHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectOpenCustomHashSet;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -107,6 +111,16 @@ public final class GenericsHighlightUtil {
               QuickFixAction.registerQuickFixAction(highlightInfo, QUICK_FIX_FACTORY.createIncreaseLanguageLevelFix(LanguageLevel.JDK_1_9));
             }
             return highlightInfo;
+          }
+        }
+
+        PsiElement parent = referenceParameterList.getParent().getParent();
+        if (parent instanceof PsiAnonymousClass) {
+          PsiAnonymousClass anonymousClass = (PsiAnonymousClass)parent;
+          if (ContainerUtil.exists(anonymousClass.getMethods(), method -> !method.hasModifierProperty(PsiModifier.PRIVATE) && method.findSuperMethods().length == 0)) {
+            return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(referenceParameterList)
+              .descriptionAndTooltip(JavaPsiBundle.message("diamond.error.anonymous.inner.classes.non.private"))
+              .create();
           }
         }
       }
@@ -377,9 +391,9 @@ public final class GenericsHighlightUtil {
     final Collection<HierarchicalMethodSignature> signaturesWithSupers = aClass.getVisibleSignatures();
     PsiManager manager = aClass.getManager();
     Map<MethodSignature, MethodSignatureBackedByPsiMethod> sameErasureMethods =
-      new THashMap<>(MethodSignatureUtil.METHOD_PARAMETERS_ERASURE_EQUALITY);
+      new Object2ObjectOpenCustomHashMap<>(MethodSignatureUtil.METHOD_PARAMETERS_ERASURE_EQUALITY);
 
-    final Set<MethodSignature> foundProblems = new THashSet<>(MethodSignatureUtil.METHOD_PARAMETERS_ERASURE_EQUALITY);
+    final Set<MethodSignature> foundProblems = new ObjectOpenCustomHashSet<>(MethodSignatureUtil.METHOD_PARAMETERS_ERASURE_EQUALITY);
     for (HierarchicalMethodSignature signature : signaturesWithSupers) {
       HighlightInfo info = checkSameErasureNotSubSignatureInner(signature, manager, aClass, sameErasureMethods);
       if (info != null && foundProblems.add(signature)) {
@@ -480,13 +494,19 @@ public final class GenericsHighlightUtil {
             continue;
           }
 
-          final String message = unrelatedDefaults != null ? " inherits unrelated defaults for " : " inherits abstract and default for ";
-          final HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(classIdentifier).descriptionAndTooltip(
-            HighlightUtil.formatClass(aClass) +
-            message +
-            JavaHighlightUtil.formatMethod(defaultMethod) + " from types " +
-            (unrelatedDefaults != null ? unrelatedDefaults
-                                       : HighlightUtil.formatClass(defaultMethodContainingClass) + " and " + HighlightUtil.formatClass(unrelatedMethodContainingClass)))
+          final String message;
+          if (unrelatedDefaults == null) {
+            message = JavaErrorBundle.message("text.class.inherits.abstract.and.default", HighlightUtil.formatClass(aClass),
+                                              JavaHighlightUtil.formatMethod(defaultMethod),
+                                              HighlightUtil.formatClass(defaultMethodContainingClass),
+                                              HighlightUtil.formatClass(unrelatedMethodContainingClass));
+          }
+          else {
+            message = JavaErrorBundle.message("text.class.inherits.unrelated.defaults", HighlightUtil.formatClass(aClass),
+                                              JavaHighlightUtil.formatMethod(defaultMethod), unrelatedDefaults);
+          }
+          final HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(classIdentifier)
+            .descriptionAndTooltip(message)
             .create();
           QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createImplementMethodsFix(aClass));
           return info;
@@ -505,7 +525,7 @@ public final class GenericsHighlightUtil {
     return defaultContainingClasses.stream().noneMatch(containingClass -> belongToOneHierarchy(containingClass, abstractMethodContainingClass));
   }
 
-  private static String hasUnrelatedDefaults(@NotNull List<? extends PsiClass> defaults) {
+  private static @Nls String hasUnrelatedDefaults(@NotNull List<? extends PsiClass> defaults) {
     if (defaults.size() > 1) {
       PsiClass[] defaultClasses = defaults.toArray(PsiClass.EMPTY_ARRAY);
       ArrayList<PsiClass> classes = new ArrayList<>(defaults);
@@ -514,7 +534,8 @@ public final class GenericsHighlightUtil {
       }
 
       if (classes.size() > 1) {
-        return HighlightUtil.formatClass(classes.get(0)) + " and " + HighlightUtil.formatClass(classes.get(1));
+        return IdeBundle.message("x.and.y", HighlightUtil.formatClass(classes.get(0)),
+                                 HighlightUtil.formatClass(classes.get(1)));
       }
     }
 
@@ -526,7 +547,7 @@ public final class GenericsHighlightUtil {
     final PsiClass superClass = psiClass.getSuperClass();
     if (superClass != null && superClass.hasTypeParameters()) {
       final Collection<HierarchicalMethodSignature> visibleSignatures = superClass.getVisibleSignatures();
-      final Map<MethodSignature, PsiMethod> overrideEquivalent = new THashMap<>(MethodSignatureUtil.METHOD_PARAMETERS_ERASURE_EQUALITY);
+      final Map<MethodSignature, PsiMethod> overrideEquivalent = new Object2ObjectOpenCustomHashMap<>(MethodSignatureUtil.METHOD_PARAMETERS_ERASURE_EQUALITY);
       for (HierarchicalMethodSignature hms : visibleSignatures) {
         final PsiMethod method = hms.getMethod();
         if (method.isConstructor()) continue;
@@ -1310,8 +1331,8 @@ public final class GenericsHighlightUtil {
         resolved instanceof PsiTypeParameterListOwner &&
         ((PsiTypeParameterListOwner)resolved).hasTypeParameters() &&
         !((PsiTypeParameterListOwner)resolved).hasModifierProperty(PsiModifier.STATIC)) {
-      return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(parent).descriptionAndTooltip(
-        "Improper formed type; some type parameters are missing").create();
+      final String message = JavaErrorBundle.message("text.improper.formed.type");
+      return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(parent).descriptionAndTooltip(message).create();
     }
     return null;
   }
@@ -1342,7 +1363,8 @@ public final class GenericsHighlightUtil {
             }
           }
           if (hiddenClass != null) {
-            return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).descriptionAndTooltip(hiddenClass.getName() + " is not accessible in current context").range(ref).create();
+            final String message = JavaErrorBundle.message("text.class.is.not.accessible", hiddenClass.getName());
+            return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).description(message).range(ref).create();
           }
         }
       }
@@ -1386,6 +1408,10 @@ public final class GenericsHighlightUtil {
     PsiClass[] classes = shortNamesCache.getClassesByName(shortName, GlobalSearchScope.allScope(manager.getProject()));
     PsiElementFactory factory = facade.getElementFactory();
     for (PsiClass aClass : classes) {
+      if (aClass == null) {
+        LOG.error("null class returned for " + shortName);
+        continue;
+      }
       if (checkReferenceTypeArgumentList(aClass, parameterList, PsiSubstitutor.EMPTY, false, version) == null) {
         PsiType[] actualTypeParameters = parameterList.getTypeArguments();
         PsiTypeParameter[] classTypeParameters = aClass.getTypeParameters();
@@ -1402,7 +1428,7 @@ public final class GenericsHighlightUtil {
     }
   }
 
-  static HighlightInfo checkInferredIntersections(@NotNull PsiSubstitutor substitutor, @NotNull TextRange ref) {
+  static HighlightInfo checkInferredIntersections(@NotNull PsiSubstitutor substitutor, @NotNull PsiMethodCallExpression call) {
     for (Map.Entry<PsiTypeParameter, PsiType> typeEntry : substitutor.getSubstitutionMap().entrySet()) {
       final String parameterName = typeEntry.getKey().getName();
       final PsiType type = typeEntry.getValue();
@@ -1412,7 +1438,7 @@ public final class GenericsHighlightUtil {
           return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
             .descriptionAndTooltip(
               JavaErrorBundle.message("type.parameter.has.incompatible.upper.bounds", parameterName, conflictingConjunctsMessage))
-            .range(ref).create();
+            .range(HighlightMethodUtil.getFixRange(call)).create();
         }
       }
     }
@@ -1420,17 +1446,18 @@ public final class GenericsHighlightUtil {
   }
 
   static HighlightInfo checkClassSupersAccessibility(@NotNull PsiClass aClass) {
-    return checkClassSupersAccessibility(aClass, aClass.getResolveScope(), HighlightNamesUtil.getClassDeclarationTextRange(aClass), true);
+    HighlightInfo.Builder builder = checkClassSupersAccessibility(aClass, aClass.getResolveScope(), true);
+    return builder == null ? null : builder.range(HighlightNamesUtil.getClassDeclarationTextRange(aClass)).create();
   }
 
-  static HighlightInfo checkClassSupersAccessibility(@NotNull PsiClass aClass, @NotNull PsiElement ref) {
-    return checkClassSupersAccessibility(aClass, ref.getResolveScope(), ref.getTextRange(), false);
+  static HighlightInfo checkClassSupersAccessibility(@NotNull PsiClass aClass, @NotNull PsiElement ref, @NotNull GlobalSearchScope scope) {
+    HighlightInfo.Builder builder = checkClassSupersAccessibility(aClass, scope, false);
+    return builder == null ? null : builder.range(ref.getTextRange()).create();
   }
 
-  private static HighlightInfo checkClassSupersAccessibility(@NotNull PsiClass aClass,
-                                                             @NotNull GlobalSearchScope resolveScope,
-                                                             @NotNull TextRange range,
-                                                             boolean checkParameters) {
+  private static HighlightInfo.Builder checkClassSupersAccessibility(@NotNull PsiClass aClass,
+                                                                     @NotNull GlobalSearchScope resolveScope,
+                                                                     boolean checkParameters) {
     final JavaPsiFacade factory = JavaPsiFacade.getInstance(aClass.getProject());
     for (PsiClassType superType : aClass.getSuperTypes()) {
       HashSet<PsiClass> checked = new HashSet<>();
@@ -1438,9 +1465,7 @@ public final class GenericsHighlightUtil {
       final String notAccessibleErrorMessage = isTypeAccessible(superType, checked, checkParameters, resolveScope, factory);
       if (notAccessibleErrorMessage != null) {
         return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
-          .descriptionAndTooltip(notAccessibleErrorMessage)
-          .range(range)
-          .create();
+          .descriptionAndTooltip(notAccessibleErrorMessage);
       }
     }
     return null;
@@ -1490,11 +1515,11 @@ public final class GenericsHighlightUtil {
   }
 
   @Nullable
-  private static String isTypeAccessible(@Nullable PsiType type,
-                                         @NotNull Set<? super PsiClass> classes,
-                                         boolean checkParameters,
-                                         @NotNull GlobalSearchScope resolveScope,
-                                         @NotNull JavaPsiFacade factory) {
+  private static @NlsContexts.DetailedDescription String isTypeAccessible(@Nullable PsiType type,
+                                                                          @NotNull Set<? super PsiClass> classes,
+                                                                          boolean checkParameters,
+                                                                          @NotNull GlobalSearchScope resolveScope,
+                                                                          @NotNull JavaPsiFacade factory) {
     type = PsiClassImplUtil.correctType(type, resolveScope);
 
     final PsiClass aClass = PsiUtil.resolveClassInType(type);
@@ -1510,7 +1535,7 @@ public final class GenericsHighlightUtil {
 
       final String qualifiedName = aClass.getQualifiedName();
       if (qualifiedName != null && factory.findClass(qualifiedName, resolveScope) == null) {
-        return "Cannot access " + HighlightUtil.formatClass(aClass);
+        return JavaErrorBundle.message("text.class.cannot.access", HighlightUtil.formatClass(aClass));
       }
 
       if (!checkParameters){

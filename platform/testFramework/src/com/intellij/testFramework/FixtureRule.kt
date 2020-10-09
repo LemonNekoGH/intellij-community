@@ -22,13 +22,16 @@ import com.intellij.openapi.project.ex.ProjectEx
 import com.intellij.openapi.project.ex.ProjectManagerEx
 import com.intellij.openapi.project.impl.ProjectManagerImpl
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.impl.VirtualFilePointerTracker
 import com.intellij.project.TestProjectManager
 import com.intellij.project.stateStore
 import com.intellij.util.containers.forEachGuaranteed
 import com.intellij.util.io.sanitizeFileName
+import com.intellij.util.throwIfNotEmpty
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
@@ -136,7 +139,7 @@ class ProjectRule(private val runPostStartUpActivities: Boolean = false,
       sharedProject = null
       sharedModule = null
     }
-    l.throwIfNotEmpty()
+    throwIfNotEmpty(l)
   }
 
   /**
@@ -367,7 +370,7 @@ suspend fun createOrLoadProject(tempDirManager: TemporaryDirectory,
     tempDirManager.newPath("test${if (directoryBased) "" else ProjectFileType.DOT_DEFAULT_EXTENSION}", refreshVfs = false)
   }
   else {
-    val dir = tempDirManager.newVirtualDirectory()
+    val dir = tempDirManager.createVirtualDir()
     withContext(AppUIExecutor.onWriteThread().coroutineDispatchingContext()) {
       runNonUndoableWriteAction(dir) {
         projectCreator(dir)
@@ -375,15 +378,23 @@ suspend fun createOrLoadProject(tempDirManager: TemporaryDirectory,
     }
   }
 
+  createOrLoadProject(file, useDefaultProjectSettings, projectCreator == null, loadComponentState, task)
+}
+
+private suspend fun createOrLoadProject(projectPath: Path,
+                                        useDefaultProjectSettings: Boolean,
+                                        isNewProject: Boolean,
+                                        loadComponentState: Boolean,
+                                        task: suspend (Project) -> Unit) {
   var options = createTestOpenProjectOptions().copy(
     useDefaultProjectAsTemplate = useDefaultProjectSettings,
-    isNewProject = projectCreator == null
+    isNewProject = isNewProject
   )
   if (loadComponentState) {
     options = options.copy(beforeInit = { it.putUserData(LISTEN_SCHEME_VFS_CHANGES_IN_TEST_MODE, true) })
   }
 
-  val project = ProjectManagerEx.getInstanceEx().openProject(file, options)!!
+  val project = ProjectManagerEx.getInstanceEx().openProject(projectPath, options)!!
   project.use {
     if (loadComponentState) {
       project.runInLoadComponentStateMode {
@@ -395,6 +406,31 @@ suspend fun createOrLoadProject(tempDirManager: TemporaryDirectory,
     }
   }
 }
+
+suspend fun loadProject(projectPath: Path, task: suspend (Project) -> Unit) {
+  createOrLoadProject(projectPath, false, false, true, task)
+}
+
+/**
+ * Copy files from [projectPaths] directories to a temp directory, load project from it and pass it to [checkProject].
+ */
+fun loadProjectAndCheckResults(projectPaths: List<Path>, tempDirectory: TemporaryDirectory, checkProject: suspend (Project) -> Unit) {
+  @Suppress("RedundantSuspendModifier")
+  suspend fun copyProjectFiles(dir: VirtualFile): Path {
+    val projectDir = VfsUtil.virtualToIoFile(dir)
+    for (projectPath in projectPaths) {
+      FileUtil.copyDir(projectPath.toFile(), projectDir)
+    }
+    VfsUtil.markDirtyAndRefresh(false, true, true, dir)
+    return projectDir.toPath()
+  }
+  runBlocking {
+    createOrLoadProject(tempDirectory, ::copyProjectFiles, loadComponentState = true, useDefaultProjectSettings = false) {
+      checkProject(it)
+    }
+  }
+}
+
 
 class DisposableRule : ExternalResource() {
   private var _disposable = lazy { Disposer.newDisposable() }

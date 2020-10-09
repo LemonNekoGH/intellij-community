@@ -3,6 +3,7 @@ package git4idea.merge.dialog
 
 import com.intellij.ide.ui.laf.darcula.DarculaUIUtil
 import com.intellij.ide.ui.laf.darcula.ui.DarculaComboBoxUI
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.ComponentWithEmptyText
 import com.intellij.util.ui.JBInsets
@@ -16,6 +17,8 @@ import java.awt.geom.Line2D
 import java.awt.geom.Rectangle2D
 import java.awt.geom.RectangularShape
 import javax.swing.JButton
+import javax.swing.JComboBox
+import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.plaf.basic.ComboPopup
 
@@ -28,7 +31,8 @@ import javax.swing.plaf.basic.ComboPopup
  */
 internal class FlatComboBoxUI(var border: Insets = Insets(1, 1, 1, 1),
                               var outerInsets: Insets = JBInsets.create(DarculaUIUtil.BW.get(), DarculaUIUtil.BW.get()),
-                              private val popupEmptyText: String = StatusText.getDefaultEmptyText())
+                              @NlsContexts.StatusText private val popupEmptyText: String = StatusText.getDefaultEmptyText(),
+                              private val popupComponentProvider: ((JComponent) -> JComponent)? = null)
   : DarculaComboBoxUI(0f, Insets(1, 0, 1, 0), false) {
 
   override fun paintArrow(g2: Graphics2D, btn: JButton) {
@@ -69,11 +73,27 @@ internal class FlatComboBoxUI(var border: Insets = Insets(1, 1, 1, 1),
 
   override fun getBorderInsets(c: Component?) = outerInsets
 
-  override fun createPopup(): ComboPopup = super.createPopup().apply { configureList(list) }
+  override fun createPopup(): ComboPopup {
+    return MyComboBoxPopup(comboBox).apply {
+      configureList(list)
+      configurePopupComponent(popupComponentProvider)
+    }
+  }
 
   private fun configureList(list: JList<*>) {
     (list as? ComponentWithEmptyText)?.let {
       it.emptyText.text = popupEmptyText
+    }
+  }
+
+  private class MyComboBoxPopup(comboBox: JComboBox<*>) : CustomComboPopup(comboBox) {
+
+    fun configurePopupComponent(popupComponentProvider: ((JComponent) -> JComponent)? = null) {
+      val popupComponent = popupComponentProvider?.invoke(scroller)
+      if (popupComponent != null) {
+        removeAll()
+        add(popupComponent)
+      }
     }
   }
 }

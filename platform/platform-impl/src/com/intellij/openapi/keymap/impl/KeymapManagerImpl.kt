@@ -3,6 +3,7 @@ package com.intellij.openapi.keymap.impl
 
 import com.intellij.configurationStore.LazySchemeProcessor
 import com.intellij.configurationStore.SchemeDataHolder
+import com.intellij.ide.IdeBundle
 import com.intellij.ide.WelcomeWizardUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -24,7 +25,6 @@ import com.intellij.openapi.util.JDOMUtil
 import com.intellij.openapi.util.text.NaturalComparator
 import com.intellij.ui.AppUIUtil
 import com.intellij.util.containers.ContainerUtil
-import com.intellij.util.containers.SmartHashSet
 import org.jdom.Element
 import java.util.*
 import java.util.function.Function
@@ -179,7 +179,7 @@ class KeymapManagerImpl : KeymapManagerEx(), PersistentStateComponent<Element> {
     while (true) {
       val next = boundShortcuts.get(id) ?: break
       if (visited == null) {
-        visited = SmartHashSet()
+        visited = HashSet()
       }
 
       id = next
@@ -215,7 +215,7 @@ class KeymapManagerImpl : KeymapManagerEx(), PersistentStateComponent<Element> {
     if (!activeKeymapName.isNullOrBlank()) {
       schemeManager.currentSchemeName = activeKeymapName
       if (schemeManager.currentSchemeName != activeKeymapName) {
-        notifyAboutMissingKeymap(activeKeymapName, "Cannot find keymap \"$activeKeymapName\"", false)
+        notifyAboutMissingKeymap(activeKeymapName, IdeBundle.message("notification.content.cannot.find.keymap", activeKeymapName), false)
       }
     }
   }

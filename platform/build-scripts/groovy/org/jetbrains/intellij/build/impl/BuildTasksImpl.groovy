@@ -337,7 +337,7 @@ idea.fatal.error.notification=disabled
       }
       else {
         buildContext.messages.info("Skipped building product distributions because 'intellij.build.target.os' property is set to '$BuildOptions.OS_NONE'")
-        distributionJARsBuilder.buildOrderFiles()
+        DistributionJARsBuilder.buildOrderFiles(buildContext)
         distributionJARsBuilder.buildSearchableOptions()
         distributionJARsBuilder.buildNonBundledPlugins()
       }
@@ -430,7 +430,7 @@ idea.fatal.error.notification=disabled
     def pluginsToPublish = new LinkedHashSet<PluginLayout>(
       DistributionJARsBuilder.getPluginsByModules(buildContext, mainPluginModules))
     def distributionJARsBuilder = compilePlatformAndPluginModules(patchApplicationInfo(), pluginsToPublish)
-    distributionJARsBuilder.buildSearchableOptions()
+    distributionJARsBuilder.buildSearchableOptions(buildContext)
     distributionJARsBuilder.buildNonBundledPlugins()
   }
 
@@ -481,6 +481,18 @@ idea.fatal.error.notification=disabled
     }
     if (files.empty) {
       buildContext.messages.error("Cannot layout pty4j native: no files extracted")
+    }
+  }
+
+  //dbus-java is used only on linux for KWallet integration.
+  //It relies on native libraries, causing notarization issues on mac.
+  //So it is excluded from all distributions and manually re-included on linux.
+  static def addDbusJava(BuildContext buildContext, String distDir) {
+    def library = buildContext.findModule("intellij.platform.credentialStore").libraryCollection.findLibrary("dbus-java")
+    library.getFiles(JpsOrderRootType.COMPILED).each { f ->
+      buildContext.ant.copy(todir: "$distDir/lib") {
+        fileset(file: f.absolutePath)
+      }
     }
   }
 
@@ -801,6 +813,7 @@ idea.fatal.error.notification=disabled
       }
     }
     else {
+      SVGPreBuilder.copyIconDb(buildContext, SystemInfo.isMac ? "$targetDirectory/Resources" : targetDirectory)
       unpackPty4jNative(buildContext, targetDirectory, null)
     }
   }

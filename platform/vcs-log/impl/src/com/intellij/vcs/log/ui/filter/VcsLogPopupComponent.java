@@ -6,17 +6,23 @@ import com.intellij.ide.DataManager;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.impl.AutoPopupSupportingListener;
 import com.intellij.openapi.ui.GraphicsConfig;
+import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.ui.ClickListener;
-import com.intellij.ui.popup.util.PopupState;
+import com.intellij.ui.popup.PopupState;
 import com.intellij.util.ui.GraphicsUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.StartupUiUtil;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.accessibility.AccessibleContextDelegate;
+import com.intellij.vcs.log.VcsLogBundle;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.accessibility.AccessibleContext;
+import javax.accessibility.AccessibleRole;
 import javax.swing.*;
 import javax.swing.border.Border;
 import java.awt.*;
@@ -30,12 +36,12 @@ public abstract class VcsLogPopupComponent extends JPanel {
   protected static final int BORDER_SIZE = 2;
   protected static final int ARC_SIZE = 10;
 
-  private final PopupState myPopupState = new PopupState();
-  @NotNull private final Supplier<String> myDisplayName;
+  private final PopupState<JBPopup> myPopupState = PopupState.forPopup();
+  @NotNull private final Supplier<@NlsContexts.Label String> myDisplayName;
   @Nullable private JLabel myNameLabel;
   @NotNull private JLabel myValueLabel;
 
-  protected VcsLogPopupComponent(@NotNull Supplier<String> displayName) {
+  protected VcsLogPopupComponent(@NotNull Supplier<@NlsContexts.Label String> displayName) {
     myDisplayName = displayName;
   }
 
@@ -154,7 +160,7 @@ public abstract class VcsLogPopupComponent extends JPanel {
   private void showPopupMenu() {
     if (myPopupState.isRecentlyHidden()) return; // do not show new popup
     ListPopup popup = createPopupMenu();
-    popup.addListener(myPopupState);
+    myPopupState.prepareToShow(popup);
     AutoPopupSupportingListener.installOn(popup);
     popup.showUnderneathOf(this);
   }
@@ -219,14 +225,45 @@ public abstract class VcsLogPopupComponent extends JPanel {
   }
 
   private static final class DynamicLabel extends JLabel {
-    private final Supplier<String> myText;
+    private final Supplier<@NlsContexts.Label String> myText;
 
-    private DynamicLabel(@NotNull Supplier<String> text) {myText = text;}
+    private DynamicLabel(@NotNull Supplier<@NlsContexts.Label String> text) {myText = text;}
 
     @Override
+    @NlsContexts.Label
     public String getText() {
       if (myText == null) return "";
       return myText.get();
+    }
+  }
+
+  @Override
+  public AccessibleContext getAccessibleContext() {
+    if (accessibleContext == null) {
+      accessibleContext = new AccessibleVcsLogPopupComponent(super.getAccessibleContext());
+    }
+    return accessibleContext;
+  }
+
+  private class AccessibleVcsLogPopupComponent extends AccessibleContextDelegate {
+
+    AccessibleVcsLogPopupComponent(AccessibleContext context) {
+      super(context);
+    }
+
+    @Override
+    protected Container getDelegateParent() {
+      return null;
+    }
+
+    @Override
+    public String getAccessibleName() {
+      return VcsLogBundle.message("vcs.log.Accessibility.filter.label", myNameLabel.getText(), myValueLabel.getText());
+    }
+
+    @Override
+    public AccessibleRole getAccessibleRole() {
+      return AccessibleRole.POPUP_MENU;
     }
   }
 }

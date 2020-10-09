@@ -5,7 +5,6 @@ import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
@@ -24,6 +23,7 @@ import com.intellij.openapi.vcs.roots.VcsRootDetector;
 import com.intellij.openapi.vcs.update.UpdateEnvironment;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.VcsSynchronousProgressWrapper;
 import com.intellij.vcs.AnnotationProviderEx;
@@ -43,6 +43,7 @@ import git4idea.config.GitVersion;
 import git4idea.diff.GitDiffProvider;
 import git4idea.history.GitHistoryProvider;
 import git4idea.i18n.GitBundle;
+import git4idea.index.GitStageManagerKt;
 import git4idea.merge.GitMergeProvider;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryManager;
@@ -52,21 +53,20 @@ import git4idea.status.GitChangeProvider;
 import git4idea.update.GitUpdateEnvironment;
 import git4idea.util.GitVcsConsoleWriter;
 import git4idea.vfs.GitVFSListener;
-import org.jetbrains.annotations.CalledInAwt;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.*;
 
 import java.util.*;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
 
 /**
  * Git VCS implementation
  */
 public final class GitVcs extends AbstractVcs {
-  public static final String NAME = "Git";
-  public static final String ID = "git";
+  public static final Supplier<@Nls String> DISPLAY_NAME = GitBundle.messagePointer("git4idea.vcs.name");
+  public static final @NonNls String NAME = "Git";
+  public static final @NonNls String ID = "git";
 
   private static final Logger LOG = Logger.getInstance(GitVcs.class.getName());
   private static final VcsKey ourKey = createKey(NAME);
@@ -144,7 +144,7 @@ public final class GitVcs extends AbstractVcs {
   @Override
   @NotNull
   public String getDisplayName() {
-    return NAME;
+    return DISPLAY_NAME.get();
   }
 
   @Override
@@ -230,11 +230,6 @@ public final class GitVcs extends AbstractVcs {
   }
 
   @Override
-  public Configurable getConfigurable() {
-    return null;
-  }
-
-  @Override
   @Nullable
   public GitChangeProvider getChangeProvider() {
     if (myProject.isDefault()) return null;
@@ -247,9 +242,9 @@ public final class GitVcs extends AbstractVcs {
    * @param list   a list of errors
    * @param action an action
    */
-  public void showErrors(@NotNull List<? extends VcsException> list, @NotNull String action) {
+  public void showErrors(@NotNull List<? extends VcsException> list, @NotNull @Nls String action) {
     if (list.size() > 0) {
-      StringBuilder buffer = new StringBuilder();
+      @Nls StringBuilder buffer = new StringBuilder();
       buffer.append("\n");
       buffer.append(GitBundle.message("error.list.title", action));
       for (final VcsException exception : list) {
@@ -274,7 +269,7 @@ public final class GitVcs extends AbstractVcs {
    * @deprecated use {@link GitVcsConsoleWriter}
    */
   @Deprecated
-  public void showCommandLine(final String cmdLine) {
+  public void showCommandLine(@Nls String cmdLine) {
     GitVcsConsoleWriter.getInstance(myProject).showCommandLine(cmdLine);
   }
 
@@ -324,7 +319,7 @@ public final class GitVcs extends AbstractVcs {
   }
 
   @Override
-  @CalledInAwt
+  @RequiresEdt
   public void enableIntegration() {
     new Task.Backgroundable(myProject, GitBundle.message("progress.title.enabling.git"), true) {
       @Override
@@ -348,12 +343,13 @@ public final class GitVcs extends AbstractVcs {
 
     return VcsSynchronousProgressWrapper.compute(
       () -> GitCommittedChangeListProvider.getCommittedChangeList(myProject, repository.getRoot(), (GitRevisionNumber)number),
-      getProject(), "Load Revision Contents");
+      getProject(), GitBundle.message("revision.load.contents"));
   }
 
   @Override
   public boolean arePartialChangelistsSupported() {
-    return true;
+    return !GitStageManagerKt.stageRegistryOption().asBoolean() ||
+           !GitStageManagerKt.stageLineStatusTrackerRegistryOption().asBoolean();
   }
 
   @TestOnly
@@ -369,6 +365,12 @@ public final class GitVcs extends AbstractVcs {
   @Override
   public boolean isWithCustomMenu() {
     return true;
+  }
+
+  @Override
+  public boolean isWithCustomLocalChanges() {
+    return GitStageManagerKt.stageRegistryOption().asBoolean() &&
+           GitStageManagerKt.stageLocalChangesRegistryOption().asBoolean();
   }
 
   @Override

@@ -25,6 +25,8 @@ import com.intellij.openapi.application.*
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
+import com.intellij.openapi.util.text.HtmlBuilder
+import com.intellij.openapi.util.text.HtmlChunk
 import com.intellij.openapi.wm.ex.WindowManagerEx
 import com.intellij.openapi.wm.impl.SystemDock
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame
@@ -36,16 +38,16 @@ import com.intellij.util.concurrency.NonUrgentExecutor
 import com.intellij.util.ui.accessibility.ScreenReader
 import java.awt.EventQueue
 import java.beans.PropertyChangeListener
-import java.io.File
+import java.nio.file.Path
 import javax.swing.JOptionPane
 
 open class IdeStarter : ApplicationStarter {
   companion object {
-    private var filesToLoad: List<File> = emptyList()
+    private var filesToLoad: List<Path> = emptyList()
     private var wizardStepProvider: CustomizeIDEWizardStepsProvider? = null
 
     @JvmStatic
-    fun openFilesOnLoading(value: List<File>) {
+    fun openFilesOnLoading(value: List<Path>) {
       filesToLoad = value
     }
 
@@ -120,7 +122,7 @@ open class IdeStarter : ApplicationStarter {
 
     val project = when {
       !needToOpenProject -> null
-      filesToLoad.isNotEmpty() -> ProjectUtil.tryOpenFileList(null, filesToLoad, "MacMenu")
+      filesToLoad.isNotEmpty() -> ProjectUtil.tryOpenFiles(null, filesToLoad, "MacMenu")
       args.isNotEmpty() -> loadProjectFromExternalCommandLine(args)
       else -> null
     }
@@ -147,7 +149,7 @@ open class IdeStarter : ApplicationStarter {
       }
     }
 
-    reportPluginError()
+    reportPluginErrors()
 
     if (!app.isHeadlessEnvironment) {
       postOpenUiTasks(app)
@@ -175,23 +177,26 @@ open class IdeStarter : ApplicationStarter {
         lifecyclePublisher.welcomeScreenDisplayed()
       }
     }
-    wizardStepProvider?.let { wizardStepProvider ->
-      var done = false
-      runInEdt {
-        val wizardDialog = object : CustomizeIDEWizardDialog(wizardStepProvider, null, false, true) {
-          override fun doOKAction() {
-            super.doOKAction()
-            showWelcomeFrame?.run()
+    //do not show Customize IDE Wizard [IDEA-249516]
+    if (System.getProperty("idea.show.customize.ide.wizard")?.toBoolean() == true) {
+      wizardStepProvider?.let { wizardStepProvider ->
+        var done = false
+        runInEdt {
+          val wizardDialog = object : CustomizeIDEWizardDialog(wizardStepProvider, null, false, true) {
+            override fun doOKAction() {
+              super.doOKAction()
+              showWelcomeFrame?.run()
+            }
+          }
+
+          if (wizardDialog.showIfNeeded()) {
+            done = true
           }
         }
 
-        if (wizardDialog.showIfNeeded()) {
-          done = true
+        if (done) {
+          return false
         }
-      }
-
-      if (done) {
-        return false
       }
     }
 
@@ -209,8 +214,9 @@ private fun loadProjectFromExternalCommandLine(commandLineArgs: List<String>): P
   Logger.getInstance("#com.intellij.idea.ApplicationLoader").info("ApplicationLoader.loadProject (cwd=${currentDirectory})")
   val result = CommandLineProcessor.processExternalCommandLine(commandLineArgs, currentDirectory)
   if (result.hasError) {
-    ApplicationManager.getApplication().invokeLater {
+    ApplicationManager.getApplication().invokeAndWait {
       result.showErrorIfFailed()
+      ApplicationManager.getApplication().exit(true, true, false)
     }
   }
   return result.project
@@ -253,14 +259,15 @@ private fun invokeLaterWithAnyModality(name: String, task: () -> Unit) {
   }
 }
 
-private fun reportPluginError() {
-  val pluginError = PluginManagerCore.ourPluginError ?: return
-  PluginManagerCore.ourPluginError = null
+private fun reportPluginErrors() {
+  val pluginErrors = PluginManagerCore.getAndClearPluginLoadingErrors()
+  if (pluginErrors.isEmpty()) return
 
   ApplicationManager.getApplication().invokeLater({
     val title = IdeBundle.message("title.plugin.error")
+    val content = HtmlBuilder().appendWithSeparators(HtmlChunk.p(), pluginErrors).toString()
     Notification(NotificationGroup.createIdWithTitle("Plugin Error", title),
-                 title, pluginError, NotificationType.ERROR) { notification, event ->
+                 title, content, NotificationType.ERROR) { notification, event ->
       notification.expire()
 
       val description = event.description

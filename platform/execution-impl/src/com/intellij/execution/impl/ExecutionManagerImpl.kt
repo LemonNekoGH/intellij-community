@@ -2,6 +2,7 @@
 package com.intellij.execution.impl
 
 import com.intellij.CommonBundle
+import com.intellij.build.BuildContentManager
 import com.intellij.execution.*
 import com.intellij.execution.configuration.CompatibilityAwareRunProfile
 import com.intellij.execution.configurations.RunConfiguration
@@ -31,7 +32,6 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.ProcessCanceledException
-import com.intellij.openapi.progress.util.ProgressIndicatorBase
 import com.intellij.openapi.project.*
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
@@ -44,7 +44,6 @@ import com.intellij.ui.UIBundle
 import com.intellij.util.Alarm
 import com.intellij.util.SmartList
 import com.intellij.util.containers.ContainerUtil
-import gnu.trove.THashSet
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.concurrency.AsyncPromise
@@ -55,11 +54,11 @@ import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 
-private val LOG = logger<ExecutionManagerImpl>()
-private val EMPTY_PROCESS_HANDLERS = emptyArray<ProcessHandler>()
 
 class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), Disposable {
   companion object {
+    val LOG = logger<ExecutionManagerImpl>()
+    private val EMPTY_PROCESS_HANDLERS = emptyArray<ProcessHandler>()
     @JvmField
     val EXECUTION_SESSION_ID_KEY = Key.create<Any>("EXECUTION_SESSION_ID_KEY")
 
@@ -130,7 +129,7 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
   private val awaitingRunProfiles = HashMap<RunProfile, ExecutionEnvironment>()
   private val runningConfigurations: MutableList<RunningConfigurationEntry> = ContainerUtil.createLockFreeCopyOnWriteList()
 
-  private val inProgress = Collections.synchronizedSet(THashSet<InProgressEntry>())
+  private val inProgress = Collections.synchronizedSet(HashSet<InProgressEntry>())
 
   private fun processNotStarted(environment: ExecutionEnvironment) {
     val executorId = environment.executor.id
@@ -225,6 +224,7 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
               val processHandler = descriptor.processHandler
               if (processHandler != null) {
                 if (!processHandler.isStartNotified) {
+                  project.messageBus.syncPublisher(EXECUTION_TOPIC).processStarting(executor.id, environment, processHandler)
                   processHandler.startNotify()
                 }
                 inProgress.remove(InProgressEntry(executor.id, environment.runner.runnerId))
@@ -338,7 +338,8 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
           if (!RunManagerImpl.canRunConfiguration(settings, executor)) {
             // we should stop here as before run task cannot be executed at all (possibly it's invalid)
             onCancelRunnable?.run()
-            ExecutionUtil.handleExecutionError(environment, ExecutionException("cannot start before run task '$settings'."))
+            ExecutionUtil.handleExecutionError(environment, ExecutionException(
+              ExecutionBundle.message("dialog.message.cannot.start.before.run.task", settings)))
             return
           }
         }
@@ -404,7 +405,8 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
           startRunnable.run()
         }
         catch (ignored: IndexNotReadyException) {
-          ExecutionUtil.handleExecutionError(environment, ExecutionException("cannot start while indexing is in progress."))
+          ExecutionUtil.handleExecutionError(environment, ExecutionException(
+            ExecutionBundle.message("dialog.message.cannot.start.while.indexing.in.progress")))
         }
       }
     }
@@ -532,7 +534,8 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
       return resolvedPromise()
     }
 
-    if ((environment.runProfile as TargetEnvironmentAwareRunProfile).defaultTargetName == null) {
+    val targetName = (environment.runProfile as TargetEnvironmentAwareRunProfile).defaultTargetName
+    if (targetName == null) {
       return resolvedPromise()
     }
 
@@ -540,24 +543,29 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
     val consoleView = TextConsoleBuilderFactory.getInstance().createBuilder(environment.project).console
     ProcessTerminatedListener.attach(processHandler)
     consoleView.attachToProcess(processHandler)
-    val executionResult = DefaultExecutionResult(consoleView, processHandler)
-    val descriptor = RunContentDescriptor(executionResult.executionConsole, executionResult.processHandler,
-                                          executionResult.executionConsole.component,
-                                          "Prepare " + environment.executionTarget.displayName)
+
+    val contentManager = BuildContentManager.getInstance(environment.project)
+    contentManager.addTabbedContent(consoleView.component,
+                                    ExecutionBundle.message("tab.group.id.targets"),
+                                    ExecutionBundle.message("tab.title.prepare.environment", targetName,
+                                                            environment.runProfile.name),
+                                    environment.runProfile.icon, consoleView)
+
     val promise = AsyncPromise<Any?>()
     ApplicationManager.getApplication().executeOnPooledThread {
       try {
-        executionResult.processHandler.startNotify()
-        val progressIndicator = object : ProgressIndicatorBase() {
-          override fun setText(text: String) {
-            processHandler.notifyTextAvailable("$text\n", ProcessOutputType.STDOUT)
+        processHandler.startNotify()
+        val targetProgressIndicator = object : TargetEnvironmentAwareRunProfileState.TargetProgressIndicator {
+
+          override fun addText(text: String, key: Key<*>) {
+            processHandler.notifyTextAvailable(text, key)
           }
 
-          override fun setText2(text: String) {
-            processHandler.notifyTextAvailable("$text\n", ProcessOutputType.STDOUT)
+          override fun isCanceled(): Boolean {
+            return false
           }
         }
-        promise.setResult(environment.prepareTargetEnvironment(currentState, progressIndicator))
+        promise.setResult(environment.prepareTargetEnvironment(currentState, targetProgressIndicator))
       }
       catch (t: Throwable) {
         promise.setError(t)
@@ -568,7 +576,6 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
         processHandler.notifyProcessTerminated(exitCode)
       }
     }
-    RunContentManager.getInstance(environment.project).showRunContent(environment.executor, descriptor)
     return promise
   }
 
@@ -585,24 +592,24 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
       }
 
       if (((showSettings && runnerAndConfigurationSettings.isEditBeforeRun) || !RunManagerImpl.canRunConfiguration(environment)) && !DumbService.isDumb(project)) {
-        if (!RunDialog.editConfiguration(environment, "Edit configuration")) {
+        if (!RunDialog.editConfiguration(environment, ExecutionBundle.message("dialog.title.edit.configuration", 0))) {
           return
         }
 
         while (!RunManagerImpl.canRunConfiguration(environment)) {
-          val message = "Configuration is still incorrect. Do you want to edit it again?"
-          val title = "Change Configuration Settings"
+          val message = ExecutionBundle.message("dialog.message.configuration.still.incorrect.do.you.want.to.edit.it.again")
+          val title = ExecutionBundle.message("dialog.title.change.configuration.settings")
           if (Messages.showYesNoDialog(project, message, title, CommonBundle.message("button.edit"), ExecutionBundle.message("run.continue.anyway"), Messages.getErrorIcon()) != Messages.YES) {
             break
           }
-          if (!RunDialog.editConfiguration(environment, "Edit configuration")) {
+          if (!RunDialog.editConfiguration(environment, ExecutionBundle.message("dialog.title.edit.configuration", 0))) {
             return
           }
         }
 
         // corresponding runner can be changed after configuration edit
         runner = ProgramRunner.getRunner(environment.executor.id, runnerAndConfigurationSettings.configuration)
-                 ?: throw ExecutionException("Cannot find runner for ${environment.runProfile.name}")
+                 ?: throw ExecutionException(ExecutionBundle.message("dialog.message.cannot.find.runner.for", environment.runProfile.name))
       }
     }
 
@@ -646,6 +653,25 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
         false
       }
     })
+  }
+
+  fun getRunning(executorIds: List<String>): Map<String, List<RunnerAndConfigurationSettings>> {
+    val result = HashMap<String, SmartList<RunnerAndConfigurationSettings>>()
+    for (entry in runningConfigurations) {
+      val id = entry.executor.id
+      if(executorIds.contains(id)) {
+        val processHandler = entry.descriptor.processHandler
+        if (processHandler != null && !processHandler.isProcessTerminated) {
+          val list = result[id] ?: kotlin.run {
+            val smartList = SmartList<RunnerAndConfigurationSettings>()
+            result[id] = smartList
+            smartList
+          }
+          list.add(entry.settings)
+        }
+      }
+    }
+    return result
   }
 
   fun getRunningDescriptors(condition: Condition<in RunnerAndConfigurationSettings>): List<RunContentDescriptor> {
@@ -705,7 +731,7 @@ private fun createEnvironmentBuilder(project: Project,
 
   val runner = configuration?.let { ProgramRunner.getRunner(executor.id, it.configuration) }
   if (runner == null && configuration != null) {
-    LOG.error("Cannot find runner for ${configuration.name}")
+    ExecutionManagerImpl.LOG.error("Cannot find runner for ${configuration.name}")
   }
   else if (runner != null) {
     builder.runnerAndSettings(runner, configuration)

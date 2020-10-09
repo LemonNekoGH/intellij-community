@@ -7,6 +7,7 @@ import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.ShutDownTracker;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.tree.IStubFileElementType;
 import com.intellij.psi.tree.StubFileElementType;
 import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.io.*;
@@ -51,11 +52,11 @@ public final class SerializationManagerImpl extends SerializationManagerEx imple
     catch (IOException e) {
       nameStorageCrashed();
       LOG.info(e);
-      repairNameStorage(); // need this in order for myNameStorage not to be null
+      repairNameStorage(e); // need this in order for myNameStorage not to be null
       nameStorageCrashed();
     }
     finally {
-      ShutDownTracker.getInstance().registerShutdownTask(this::performShutdown);
+      ShutDownTracker.getInstance().registerShutdownTask(this::performShutdown, this);
     }
 
     StubElementTypeHolderEP.EP_NAME.addChangeListener(this::dropSerializerData, this);
@@ -86,7 +87,7 @@ public final class SerializationManagerImpl extends SerializationManagerEx imple
   }
 
   @Override
-  public void repairNameStorage() {
+  public void repairNameStorage(@NotNull Exception corruptionCause) {
     if (myNameStorageCrashed.getAndSet(false)) {
       try {
         LOG.info("Name storage is repaired");
@@ -128,7 +129,7 @@ public final class SerializationManagerImpl extends SerializationManagerEx imple
   @Override
   public void reinitializeNameStorage() {
     nameStorageCrashed();
-    repairNameStorage();
+    repairNameStorage(new Exception("Indexes are requested to rebuild"));
   }
 
   private void nameStorageCrashed() {
@@ -237,6 +238,7 @@ public final class SerializationManagerImpl extends SerializationManagerEx imple
     //noinspection SynchronizeOnThis
     synchronized (this) {
       IStubElementType.dropRegisteredTypes();
+      IStubFileElementType.dropTemplateStubBaseVersion();
       StubSerializationHelper helper = myStubSerializationHelper;
       if (helper != null) {
         helper.dropRegisteredSerializers();

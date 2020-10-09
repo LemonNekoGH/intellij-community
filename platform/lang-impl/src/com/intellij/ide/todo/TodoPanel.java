@@ -16,7 +16,6 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.RangeMarker;
@@ -25,6 +24,7 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.impl.VisibilityWatcher;
 import com.intellij.psi.PsiDocumentManager;
@@ -39,7 +39,7 @@ import com.intellij.usageView.UsageInfo;
 import com.intellij.usages.impl.UsagePreviewPanel;
 import com.intellij.util.Alarm;
 import com.intellij.util.EditSourceOnDoubleClickHandler;
-import com.intellij.util.OpenSourceUtil;
+import com.intellij.util.EditSourceOnEnterKeyHandler;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.ui.tree.TreeModelAdapter;
 import com.intellij.util.ui.tree.TreeUtil;
@@ -54,10 +54,7 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeNode;
 import javax.swing.tree.TreePath;
-import java.awt.event.KeyAdapter;
-import java.awt.event.KeyEvent;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -169,6 +166,7 @@ public abstract class TodoPanel extends SimpleToolWindowPanel implements Occuren
     myTree.setRowHeight(0); // enable variable-height rows
     myTree.setCellRenderer(new TodoCompositeRenderer());
     EditSourceOnDoubleClickHandler.install(myTree);
+    EditSourceOnEnterKeyHandler.install(myTree);
     new TreeSpeedSearch(myTree);
 
     DefaultActionGroup group = new DefaultActionGroup();
@@ -179,26 +177,6 @@ public abstract class TodoPanel extends SimpleToolWindowPanel implements Occuren
     group.addSeparator();
     group.add(ActionManager.getInstance().getAction(IdeActions.GROUP_VERSION_CONTROLS));
     PopupHandler.installPopupHandler(myTree, group, ActionPlaces.TODO_VIEW_POPUP, ActionManager.getInstance());
-
-    myTree.addKeyListener(
-      new KeyAdapter() {
-        @Override
-        public void keyPressed(KeyEvent e) {
-          if (!e.isConsumed() && KeyEvent.VK_ENTER == e.getKeyCode()) {
-            TreePath path = myTree.getSelectionPath();
-            if (path == null) {
-              return;
-            }
-            final Object userObject = ((DefaultMutableTreeNode)path.getLastPathComponent()).getUserObject();
-            if (!((userObject instanceof NodeDescriptor ? (NodeDescriptor)userObject : null) instanceof TodoItemNode)) {
-              return;
-            }
-            OpenSourceUtil.openSourcesFrom(DataManager.getInstance().getDataContext(TodoPanel.this), false);
-          }
-        }
-      }
-    );
-
 
     myUsagePreviewPanel = new UsagePreviewPanel(myProject, FindInProjectUtil.setupViewPresentation(false, new FindModel()));
     Disposer.register(this, myUsagePreviewPanel);
@@ -350,7 +328,7 @@ public abstract class TodoPanel extends SimpleToolWindowPanel implements Occuren
     return TodoTreeBuilder.getFileForNode(node);
   }
 
-  protected void setDisplayName(String tabName) {
+  protected void setDisplayName(@NlsContexts.TabTitle  String tabName) {
     myContent.setDisplayName(tabName);
   }
 
@@ -458,19 +436,7 @@ public abstract class TodoPanel extends SimpleToolWindowPanel implements Occuren
   protected void rebuildWithAlarm(final Alarm alarm) {
     alarm.cancelAllRequests();
     alarm.addRequest(() -> {
-      ReadAction.nonBlocking(() -> {
-        final Set<VirtualFile> files = new HashSet<>();
-        if (myTodoTreeBuilder.isDisposed()) return;
-        myTodoTreeBuilder.collectFiles(virtualFile -> {
-          files.add(virtualFile);
-          return true;
-        });
-        ApplicationManager.getApplication().invokeLater(() -> {
-          if (myTodoTreeBuilder.isDisposed()) return;
-          myTodoTreeBuilder.rebuildCache(files);
-          updateTree();
-        });
-      }).executeSynchronously();
+      myTodoTreeBuilder.rebuildCache();
     }, 300);
   }
 

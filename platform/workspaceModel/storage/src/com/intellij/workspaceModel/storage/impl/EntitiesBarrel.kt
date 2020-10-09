@@ -1,6 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.workspaceModel.storage.impl
 
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.workspaceModel.storage.PersistentEntityId
 import com.intellij.workspaceModel.storage.WorkspaceEntity
 import com.intellij.workspaceModel.storage.WorkspaceEntityWithPersistentId
@@ -38,7 +39,10 @@ internal class MutableEntitiesBarrel private constructor(
 
   fun <T : WorkspaceEntity> replaceById(newEntity: WorkspaceEntityData<T>, clazz: Int) {
     val family = getMutableEntityFamily(clazz) as MutableEntityFamily<T>
-    if (!family.exists(newEntity.id)) error("Nothing to replace")
+    if (!family.exists(newEntity.id)) {
+      thisLogger().error("Nothing to replace. Class: $clazz, new entity: $newEntity")
+      return
+    }
     family.replaceById(newEntity)
   }
 
@@ -57,7 +61,7 @@ internal class MutableEntitiesBarrel private constructor(
     fillEmptyFamilies(unmodifiableEntityId)
 
     val entityFamily = entityFamilies[unmodifiableEntityId] ?: run {
-      val emptyEntityFamily = MutableEntityFamily.createEmptyMutable()
+      val emptyEntityFamily = MutableEntityFamily.createEmptyMutable<WorkspaceEntity>()
       entityFamilies[unmodifiableEntityId] = emptyEntityFamily
       emptyEntityFamily
     }
@@ -88,7 +92,7 @@ internal sealed class EntitiesBarrel {
 
   fun size() = entityFamilies.size
 
-  fun assertConsistency() {
+  fun assertConsistency(abstractEntityStorage: AbstractEntityStorage) {
     val persistentIds = HashSet<PersistentEntityId<*>>()
     entityFamilies.forEachIndexed { i, family ->
       val clazz = i.findEntityClass<WorkspaceEntity>()
@@ -109,6 +113,10 @@ internal sealed class EntitiesBarrel {
           assert(persistentId != null) { "Persistent id expected for $clazz" }
           assert(persistentId !in persistentIds) { "Duplicated persistent ids: $persistentId" }
           persistentIds.add(persistentId!!)
+        }
+
+        if (entityData is WithAssertableConsistency) {
+          entityData.assertConsistency(abstractEntityStorage)
         }
       }
     }

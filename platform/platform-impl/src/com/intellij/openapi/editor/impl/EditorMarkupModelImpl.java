@@ -36,6 +36,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerEvent;
 import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.fileEditor.impl.EditorWindowHolder;
 import com.intellij.openapi.project.DumbAwareAction;
+import com.intellij.openapi.ui.JBPopupMenu;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.registry.Registry;
@@ -49,13 +50,12 @@ import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.Alarm;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.*;
 import com.intellij.util.ui.update.MergingUpdateQueue;
 import com.intellij.util.ui.update.Update;
-import gnu.trove.THashSet;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -153,6 +153,7 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
   private InspectionPopupManager myPopupManager;
   private final Disposable resourcesDisposable = Disposer.newDisposable();
   private final Alarm statusTimer = new Alarm(resourcesDisposable);
+  private final Map<InspectionWidgetActionProvider, AnAction> extensionActions = new HashMap<>();
 
   EditorMarkupModelImpl(@NotNull EditorImpl editor) {
     super(editor.getDocument());
@@ -174,8 +175,7 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
     };
 
     StatusAction statusAction = new StatusAction();
-    DefaultActionGroup actions = new DefaultActionGroup(statusAction, navigateGroup);
-    fillEPActions(actions);
+    DefaultActionGroup actions = new DefaultActionGroup(createEPActions(), statusAction, navigateGroup);
 
     ActionButtonLook editorButtonLook = new EditorToolbarButtonLook();
     statusToolbar = new ActionToolbarImpl(ActionPlaces.EDITOR_INSPECTIONS_TOOLBAR, actions, true) {
@@ -188,6 +188,11 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
       protected @NotNull Color getSeparatorColor() {
         Color separatorColor = myEditor.getColorsScheme().getColor(EditorColors.SEPARATOR_BELOW_COLOR);
         return separatorColor != null ? separatorColor : super.getSeparatorColor();
+      }
+
+      @Override
+      protected int getSeparatorHeight() {
+        return getStatusIconSize();
       }
 
       @Override
@@ -227,6 +232,15 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
 
         actionButton.setLook(editorButtonLook);
         return actionButton;
+      }
+
+      @Override
+      protected JComponent createCustomComponent(@NotNull CustomComponentAction action, @NotNull Presentation presentation) {
+        JComponent component = super.createCustomComponent(action, presentation);
+        if (component instanceof ActionButton) {
+          ((ActionButton)component).setLook(editorButtonLook);
+        }
+        return component;
       }
 
       @Override
@@ -379,38 +393,34 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
     }
   }
 
-  private void fillEPActions(DefaultActionGroup actions) {
-    InspectionWidgetActionProvider.EP_NAME.getExtensionList().
-      forEach(p -> {
-        Separator separator = p.getSeparator();
-        if (separator != null) {
-          actions.add(separator, Constraints.FIRST);
-        }
+  private DefaultActionGroup createEPActions() {
+    DefaultActionGroup epActions = new DefaultActionGroup();
 
-        actions.add(p.getAction(myEditor), Constraints.FIRST);
+    InspectionWidgetActionProvider.EP_NAME.getExtensionList().
+      forEach(extension -> {
+        AnAction action = extension.createAction(myEditor);
+        extensionActions.put(extension, action);
+        epActions.add(action);
       });
 
     InspectionWidgetActionProvider.EP_NAME.addExtensionPointListener(new ExtensionPointListener<InspectionWidgetActionProvider>() {
       @Override
       public void extensionAdded(@NotNull InspectionWidgetActionProvider extension, @NotNull PluginDescriptor pluginDescriptor) {
-        Separator separator = extension.getSeparator();
-        if (separator != null) {
-          actions.add(separator, Constraints.FIRST);
-        }
-
-        actions.add(extension.getAction(myEditor), Constraints.FIRST);
+        AnAction action = extension.createAction(myEditor);
+        extensionActions.put(extension, action);
+        epActions.add(action);
       }
 
       @Override
       public void extensionRemoved(@NotNull InspectionWidgetActionProvider extension, @NotNull PluginDescriptor pluginDescriptor) {
-        actions.remove(extension.getAction(myEditor));
-
-        Separator separator = extension.getSeparator();
-        if (separator != null) {
-          actions.remove(separator);
+        AnAction action = extensionActions.remove(extension);
+        if (action != null) {
+          epActions.remove(action);
         }
       }
     }, resourcesDisposable);
+
+    return epActions;
   }
 
   private AnAction createAction(@NotNull String id, @NotNull Icon icon) {
@@ -465,7 +475,7 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
 
     myStatusUpdates.queue(Update.create("icon", () -> {
       if (myErrorStripeRenderer != null) {
-        AnalyzerStatus newStatus = myErrorStripeRenderer.getStatus(myEditor);
+        AnalyzerStatus newStatus = myErrorStripeRenderer.getStatus();
         if (!AnalyzerStatus.equals(newStatus, analyzerStatus)) {
           changeStatus(newStatus);
         }
@@ -479,7 +489,8 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
     boolean resetAnalyzingStatus = analyzerStatus != null &&
                             analyzerStatus.isTextStatus() && analyzerStatus.getAnalyzingType() == AnalyzingType.COMPLETE;
     analyzerStatus = newStatus;
-    smallIconLabel.setIcon(analyzerStatus.getAnalyzingType() == AnalyzingType.COMPLETE ? analyzerStatus.getIcon() : AllIcons.General.InspectionsEye);
+    AnalyzingType type = analyzerStatus.getAnalyzingType();
+    smallIconLabel.setIcon(type == AnalyzingType.COMPLETE || type == AnalyzingType.SUSPENDED ? analyzerStatus.getIcon() : AllIcons.General.InspectionsEye);
 
     if (showToolbar != analyzerStatus.getController().enableToolbar()) {
       showToolbar = EditorSettingsExternalizable.getInstance().isShowInspectionWidget() &&
@@ -554,7 +565,7 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
     boolean isVisible = myWheelAccumulator == 0 && area.contains(area.x, visualY);
 
     if (UIUtil.uiParents(myEditor.getComponent(), false).filter(EditorWindowHolder.class).isEmpty() || isVisible || !UISettings.getInstance().getShowEditorToolTip()) {
-      final Set<RangeHighlighter> highlighters = new THashSet<>();
+      final Set<RangeHighlighter> highlighters = new HashSet<>();
       getNearestHighlighters(this, me.getY(), highlighters);
       getNearestHighlighters(((EditorEx)getEditor()).getFilteredDocumentMarkupModel(), me.getY(), highlighters);
       if (highlighters.isEmpty()) return false;
@@ -795,6 +806,7 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
 
     myPopupManager.hidePopup();
     myPopupManager = null;
+    extensionActions.clear();
 
     Disposer.dispose(resourcesDisposable);
 
@@ -815,13 +827,16 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
   private void rebuildErrorStripeMarksModel() {
     ErrorStripeMarkersModel errorStripeMarkersModel = myErrorStripeMarkersModel;
     errorStripeMarkersModel.clear();
-    Processor<RangeHighlighterEx> processor = ex -> {
-      errorStripeMarkersModel.afterAdded(ex);
-      return true;
-    };
+
     int textLength = myEditor.getDocument().getTextLength();
-    processRangeHighlightersOverlappingWith(0, textLength, processor);
-    myEditor.getFilteredDocumentMarkupModel().processRangeHighlightersOverlappingWith(0, textLength, processor);
+    processRangeHighlightersOverlappingWith(0, textLength, ex -> {
+      errorStripeMarkersModel.afterAdded(ex, false);
+      return true;
+    });
+    myEditor.getFilteredDocumentMarkupModel().processRangeHighlightersOverlappingWith(0, textLength, ex -> {
+      errorStripeMarkersModel.afterAdded(ex, true);
+      return true;
+    });
   }
 
   void repaint() {
@@ -1043,10 +1058,9 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
       final int[] thinYStart = new int[1];  // in range 0..yStart all spots are drawn
       final int[] wideYStart = new int[1];  // in range 0..yStart all spots are drawn
 
-      MarkupIterator<ErrorStripeMarkerImpl> iterator = myErrorStripeMarkersModel.overlappingIterator(startOffset, endOffset);
+      MarkupIterator<RangeHighlighterEx> iterator = myErrorStripeMarkersModel.highlighterIterator(startOffset, endOffset);
       try {
-        ContainerUtil.process(iterator, errorStripeMarker -> {
-          RangeHighlighterEx highlighter = errorStripeMarker.getHighlighter();
+        ContainerUtil.process(iterator, highlighter -> {
           boolean isThin = highlighter.isThinErrorStripeMark();
           int[] yStart = isThin ? thinYStart : wideYStart;
           List<PositionedStripe> stripes = isThin ? thinStripes : wideStripes;
@@ -1206,11 +1220,6 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
         return;
       }
 
-      if (e.getY() < buttonHeight && myErrorStripeRenderer != null) {
-        showTrafficLightTooltip(e);
-        return;
-      }
-
       if (e.getX() > 0 && e.getX() <= getWidth() && showToolTipByMouseMove(e)) {
         UIUtil.setCursor(scrollbar, Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         return;
@@ -1238,16 +1247,6 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
       }
       myRowAdjuster = myWheelAccumulator / myEditor.getLineHeight();
       showToolTipByMouseMove(e);
-    }
-
-    private @Nullable TrafficTooltipRenderer myTrafficTooltipRenderer;
-
-    private void showTrafficLightTooltip(@NotNull MouseEvent e) {
-      if (myTrafficTooltipRenderer == null) {
-        myTrafficTooltipRenderer = myTooltipRendererProvider.createTrafficTooltipRenderer(() -> myTrafficTooltipRenderer = null, myEditor);
-      }
-      showTooltip(myTrafficTooltipRenderer, new HintHint(e).setAwtTooltip(true).setMayCenterPosition(true).setContentActive(false)
-        .setPreferredPosition(Balloon.Position.atLeft));
     }
 
     private void cancelMyToolTips(final MouseEvent e, boolean checkIfShouldSurvive) {
@@ -1362,7 +1361,7 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
         if (text == null) continue;
 
         if (tooltips == null) {
-          tooltips = new THashSet<>();
+          tooltips = new HashSet<>();
         }
         if (tooltips.add(text)) {
           if (bigRenderer == null) {
@@ -1385,31 +1384,6 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
     @Override
     public @NotNull TooltipRenderer calcTooltipRenderer(final @NotNull String text, final int width) {
       return new LineTooltipRenderer(text, width, new Object[]{text});
-    }
-
-    @Override
-    public @NotNull TrafficTooltipRenderer createTrafficTooltipRenderer(final @NotNull Runnable onHide, @NotNull Editor editor) {
-      return new TrafficTooltipRenderer() {
-        @Override
-        public void repaintTooltipWindow() {
-        }
-
-        @Override
-        public @NotNull LightweightHint show(@NotNull Editor editor,
-                                             @NotNull Point p,
-                                             boolean alignToRight,
-                                             @NotNull TooltipGroup group,
-                                             @NotNull HintHint hintHint) {
-          JLabel label = new JLabel("WTF");
-          return new LightweightHint(label) {
-            @Override
-            public void hide() {
-              super.hide();
-              onHide.run();
-            }
-          };
-        }
-      };
     }
   }
 
@@ -1573,6 +1547,10 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
       mouseListener = new MouseAdapter() {
         @Override
         public void mouseClicked(MouseEvent me) {
+          if (SwingUtilities.isLeftMouseButton(me)) showInspectionsHint(me);
+        }
+
+        private void showInspectionsHint(MouseEvent me) {
           DataContext context = getDataContext();
           AnActionEvent event = AnActionEvent.createFromInputEvent(me, place, presentation, context, false, true);
           if (!ActionUtil.lastUpdateAndCheckDumb(action, event, false)) {
@@ -1595,14 +1573,28 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
           }
         }
 
+        private void showContextMenu(MouseEvent me) {
+          DefaultActionGroup group = new DefaultActionGroup();
+          /*
+          TODO: show context menu by right click
+          group.addAll(analyzerStatus.getController().getActions());
+          group.add(new CompactViewAction());
+          */
+          if (0 < group.getChildrenCount()) {
+            JBPopupMenu.showByEvent(me, ActionPlaces.EDITOR_INSPECTIONS_TOOLBAR, group);
+          }
+        }
+
         @Override
         public void mousePressed(MouseEvent me) {
+          if (me.isPopupTrigger()) showContextMenu(me);
           mousePressed = true;
           repaint();
         }
 
         @Override
         public void mouseReleased(MouseEvent me) {
+          if (me.isPopupTrigger()) showContextMenu(me);
           mousePressed = false;
           repaint();
         }
@@ -1674,7 +1666,7 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
       GridBag gc = new GridBag().nextLine();
       if (status.size() == 1 && StringUtil.isEmpty(status.get(0).getText())) {
         add(createStyledLabel(null, status.get(0).getIcon(), SwingConstants.CENTER),
-            gc.next().weightx(1).fillCellHorizontally());
+            gc.next().weightx(1).weighty(1).fillCell());
       }
       else if (status.size() > 0) {
         int leftRightOffset = JBUIScale.scale(LEFT_RIGHT_INDENT);
@@ -1683,14 +1675,14 @@ public final class EditorMarkupModelImpl extends MarkupModelImpl
         int counter = 0;
         for (StatusItem item : status) {
           add(createStyledLabel(item.getText(), item.getIcon(), SwingConstants.LEFT),
-              gc.next().insetLeft(counter++ > 0 ? INTER_GROUP_OFFSET : 0));
+              gc.next().insetLeft(counter++ > 0 ? INTER_GROUP_OFFSET : 0).fillCell().weighty(1));
         }
 
         add(Box.createHorizontalStrut(leftRightOffset), gc.next());
       }
     }
 
-    private JLabel createStyledLabel(@Nullable String text, @Nullable Icon icon, int alignment) {
+    private JLabel createStyledLabel(@Nullable @Nls String text, @Nullable Icon icon, int alignment) {
       JLabel label = new JLabel(text, icon, alignment) {
         @Override
         protected void paintComponent(Graphics graphics) {

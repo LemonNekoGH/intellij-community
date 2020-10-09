@@ -1,9 +1,6 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vfs.newvfs.persistent;
 
-import com.intellij.ide.IdeBundle;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
@@ -25,23 +22,20 @@ import com.intellij.util.*;
 import com.intellij.util.concurrency.SequentialTaskExecutor;
 import com.intellij.util.containers.ConcurrentIntObjectMap;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.ObjectIntHashMap;
 import com.intellij.util.hash.ContentHashEnumerator;
 import com.intellij.util.io.DataOutputStream;
 import com.intellij.util.io.*;
 import com.intellij.util.io.storage.*;
-import gnu.trove.TIntArrayList;
-import gnu.trove.TObjectHashingStrategy;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import org.jetbrains.annotations.*;
 
-import javax.swing.*;
-import java.awt.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
-import java.util.List;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -63,9 +57,7 @@ public final class FSRecords {
   private static final boolean useSmallAttrTable = SystemProperties.getBooleanProperty("idea.use.small.attr.table.for.vfs", true);
   private static final boolean ourStoreRootsSeparately = SystemProperties.getBooleanProperty("idea.store.roots.separately", false);
 
-  //TODO[anyone] when bumping the version, please delete `ourSymlinkTargetAttr_old`, use it's value for `ourSymlinkTargetAttr`,
-  //             and drop path conversion from `readSymlinkTarget`
-  private static final int VERSION = 53 +
+  private static final int VERSION = 55 +
                                      (WE_HAVE_CONTENT_HASHES ? 0x10 : 0) +
                                      (IOUtil.BYTE_BUFFERS_USE_NATIVE_BYTE_ORDER ? 0x37 : 0) +
                                      (bulkAttrReadSupport ? 0x27 : 0) +
@@ -110,9 +102,7 @@ public final class FSRecords {
   private static final int CORRUPTED_MAGIC = 0xabcf7f7f;
 
   private static final FileAttribute ourChildrenAttr = new FileAttribute("FsRecords.DIRECTORY_CHILDREN");
-  private static final FileAttribute ourSymlinkTargetAttr = new FileAttribute("FsRecords.SYMLINK_TARGET_2");
-  private static final FileAttribute ourSymlinkTargetAttr_old = new FileAttribute("FsRecords.SYMLINK_TARGET");
-
+  private static final FileAttribute ourSymlinkTargetAttr = new FileAttribute("FsRecords.SYMLINK_TARGET");
   private static final ReentrantReadWriteLock lock;
   private static final ReentrantReadWriteLock.ReadLock r;
   private static final ReentrantReadWriteLock.WriteLock w;
@@ -120,8 +110,11 @@ public final class FSRecords {
   private static volatile int ourLocalModificationCount;
   private static volatile boolean ourIsDisposed;
 
-  private static final int FREE_RECORD_FLAG = 0x100;
-  private static final int ALL_VALID_FLAGS = PersistentFS.ALL_VALID_FLAGS | FREE_RECORD_FLAG;
+  private static final int FREE_RECORD_FLAG = 0x400;
+  static {
+    assert (PersistentFS.Flags.ALL_VALID_FLAGS & FREE_RECORD_FLAG) == 0 : PersistentFS.Flags.ALL_VALID_FLAGS;
+  }
+  private static final int ALL_VALID_FLAGS = PersistentFS.Flags.ALL_VALID_FLAGS | FREE_RECORD_FLAG;
   private static final int MAX_INITIALIZATION_ATTEMPTS = 10;
 
   static {
@@ -141,11 +134,7 @@ public final class FSRecords {
       setTimestamp(id, attributes.lastModified);
       setLength(id, attributes.isDirectory() ? -1L : attributes.length);
 
-      setFlags(id, (attributes.isDirectory() ? PersistentFS.IS_DIRECTORY_FLAG : 0) |
-                   (attributes.isWritable() ? 0 : PersistentFS.IS_READ_ONLY) |
-                   (attributes.isSymLink() ? PersistentFS.IS_SYMLINK : 0) |
-                   (attributes.isSpecial() ? PersistentFS.IS_SPECIAL : 0) |
-                   (attributes.isHidden() ? PersistentFS.IS_HIDDEN : 0), true);
+      setFlags(id, PersistentFSImpl.fileAttributesToFlags(attributes), true);
       setParent(id, parentId);
       return nameId;
     });
@@ -181,7 +170,7 @@ public final class FSRecords {
     private static RefCountingStorage myContents;
     private static ResizeableMappedFile myRecords;
     private static ContentHashEnumerator myContentHashesEnumerator;
-    private static File myRootsFile;
+    private static Path myRootsFile;
     private static final VfsDependentEnum<String> myAttributesList = new VfsDependentEnum<>("attrib", EnumeratorStringDescriptor.INSTANCE, 1);
     private static final IntList myFreeRecords = new IntArrayList();
 
@@ -253,24 +242,26 @@ public final class FSRecords {
       throw new RuntimeException("Can't initialize filesystem storage", exception);
     }
 
-    @Nullable
-    private static Exception tryInit() {
-      final File basePath = basePath().getAbsoluteFile();
-      if (!(basePath.isDirectory() || basePath.mkdirs())) {
-        return new RuntimeException("Cannot create storage directory: " + basePath);
+    private static @Nullable Exception tryInit() {
+      Path basePath = basePath().getAbsoluteFile().toPath();
+      try {
+        Files.createDirectories(basePath);
+      }
+      catch (IOException e) {
+        return e;
       }
 
-      final File namesFile = new File(basePath, "names" + VFS_FILES_EXTENSION);
-      final File attributesFile = new File(basePath, "attrib" + VFS_FILES_EXTENSION);
-      final File contentsFile = new File(basePath, "content" + VFS_FILES_EXTENSION);
-      final File contentsHashesFile = new File(basePath, "contentHashes" + VFS_FILES_EXTENSION);
-      final File recordsFile = new File(basePath, "records" + VFS_FILES_EXTENSION);
-      myRootsFile = ourStoreRootsSeparately ? new File(basePath, "roots" + VFS_FILES_EXTENSION) : null;
+      Path namesFile = basePath.resolve("names" + VFS_FILES_EXTENSION);
+      Path attributesFile = basePath.resolve("attrib" + VFS_FILES_EXTENSION);
+      Path contentsFile = basePath.resolve("content" + VFS_FILES_EXTENSION);
+      Path contentsHashesFile = basePath.resolve("contentHashes" + VFS_FILES_EXTENSION);
+      Path recordsFile = basePath.resolve("records" + VFS_FILES_EXTENSION);
+      myRootsFile = ourStoreRootsSeparately ? basePath.resolve("roots" + VFS_FILES_EXTENSION) : null;
 
-      final File vfsDependentEnumBaseFile = VfsDependentEnum.getBaseFile();
+      File vfsDependentEnumBaseFile = VfsDependentEnum.getBaseFile();
 
-      if (!namesFile.exists()) {
-        invalidateIndex("'" + namesFile.getPath() + "' does not exist");
+      if (!Files.exists(namesFile)) {
+        invalidateIndex("'" + namesFile + "' does not exist");
       }
 
       try {
@@ -280,16 +271,16 @@ public final class FSRecords {
         }
 
         StorageLockContext storageLockContext = new StorageLockContext(false);
-        myNames = new PersistentStringEnumerator(namesFile.toPath(), storageLockContext);
+        myNames = new PersistentStringEnumerator(namesFile, storageLockContext);
 
-        myAttributes = new Storage(attributesFile.getPath(), REASONABLY_SMALL) {
+        myAttributes = new Storage(attributesFile, REASONABLY_SMALL) {
           @Override
-          protected AbstractRecordsTable createRecordsTable(PagePool pool, File recordsFile) throws IOException {
+          protected AbstractRecordsTable createRecordsTable(PagePool pool, @NotNull Path recordsFile) throws IOException {
             return inlineAttributes && useSmallAttrTable ? new CompactRecordsTable(recordsFile, pool, false) : super.createRecordsTable(pool, recordsFile);
           }
         };
 
-        myContents = new RefCountingStorage(contentsFile.getPath(), CapacityAllocationPolicy.FIVE_PERCENT_FOR_GROWTH, useCompressionUtil) {
+        myContents = new RefCountingStorage(contentsFile, CapacityAllocationPolicy.FIVE_PERCENT_FOR_GROWTH, useCompressionUtil) {
           @NotNull
           @Override
           protected ExecutorService createExecutor() {
@@ -298,11 +289,11 @@ public final class FSRecords {
         };
 
         // sources usually zipped with 4x ratio
-        myContentHashesEnumerator = WE_HAVE_CONTENT_HASHES ? new ContentHashEnumerator(contentsHashesFile.toPath(), storageLockContext) : null;
+        myContentHashesEnumerator = WE_HAVE_CONTENT_HASHES ? new ContentHashEnumerator(contentsHashesFile, storageLockContext) : null;
 
         boolean aligned = PagedFileStorage.BUFFER_SIZE % RECORD_SIZE == 0;
         if (!aligned) LOG.error("Buffer size " + PagedFileStorage.BUFFER_SIZE + " is not aligned for record size " + RECORD_SIZE);
-        myRecords = new ResizeableMappedFile(recordsFile.toPath(), 20 * 1024, storageLockContext,
+        myRecords = new ResizeableMappedFile(recordsFile, 20 * 1024, storageLockContext,
                                              PagedFileStorage.BUFFER_SIZE, aligned, IOUtil.BYTE_BUFFERS_USE_NATIVE_BYTE_ORDER);
 
         boolean initial = myRecords.length() == 0;
@@ -335,8 +326,8 @@ public final class FSRecords {
 
           boolean deleted = FileUtil.delete(getCorruptionMarkerFile());
           deleted &= IOUtil.deleteAllFilesStartingWith(namesFile);
-          deleted &= AbstractStorage.deleteFiles(attributesFile.getPath());
-          deleted &= AbstractStorage.deleteFiles(contentsFile.getPath());
+          deleted &= AbstractStorage.deleteFiles(attributesFile);
+          deleted &= AbstractStorage.deleteFiles(contentsFile);
           deleted &= IOUtil.deleteAllFilesStartingWith(contentsHashesFile);
           deleted &= IOUtil.deleteAllFilesStartingWith(recordsFile);
           deleted &= IOUtil.deleteAllFilesStartingWith(vfsDependentEnumBaseFile);
@@ -346,35 +337,10 @@ public final class FSRecords {
             throw new IOException("Cannot delete filesystem storage files");
           }
         }
-        catch (final IOException e1) {
-          final Runnable warnAndShutdown = () -> {
-            if (ApplicationManager.getApplication().isUnitTestMode()) {
-              //noinspection CallToPrintStackTrace
-              e1.printStackTrace();
-            }
-            else {
-              final String message = "Files in " + basePath.getPath() + " are locked.\n" +
-                                     ApplicationNamesInfo.getInstance().getProductName() + " will not be able to start up.";
-              if (!ApplicationManager.getApplication().isHeadlessEnvironment()) {
-                JOptionPane.showMessageDialog(JOptionPane.getRootFrame(), message, IdeBundle.message("dialog.title.fatal.error"), JOptionPane.ERROR_MESSAGE);
-              }
-              else {
-                //noinspection UseOfSystemOutOrSystemErr
-                System.err.println(message);
-              }
-            }
-            Runtime.getRuntime().halt(1);
-          };
-
-          if (EventQueue.isDispatchThread()) {
-            warnAndShutdown.run();
-          }
-          else {
-            //noinspection SSBasedInspection
-            SwingUtilities.invokeLater(warnAndShutdown);
-          }
-
-          throw new RuntimeException("Can't rebuild filesystem storage ", e1);
+        catch (IOException e1) {
+          e1.addSuppressed(e);
+          LOG.warn("Cannot rebuild filesystem storage", e1);
+          return e1;
         }
 
         return e;
@@ -715,10 +681,9 @@ public final class FSRecords {
   static int @NotNull [] listRoots() {
     return readAndHandleErrors(() -> {
       if (ourStoreRootsSeparately) {
-        TIntArrayList result = new TIntArrayList();
+        IntList result = new IntArrayList();
 
-        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") LineNumberReader stream =
-               new LineNumberReader(new BufferedReader(new InputStreamReader(new FileInputStream(DbConnection.myRootsFile))))) {
+        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") LineNumberReader stream = new LineNumberReader(Files.newBufferedReader(DbConnection.myRootsFile))) {
           String str;
           while ((str = stream.readLine()) != null) {
             int index = str.indexOf(' ');
@@ -727,8 +692,7 @@ public final class FSRecords {
           }
         }
         catch (FileNotFoundException ignored) { }
-
-        return result.toNativeArray();
+        return result.toIntArray();
       }
 
       try (DataInputStream input = readAttribute(ROOT_RECORD_ID, ourChildrenAttr)) {
@@ -770,8 +734,7 @@ public final class FSRecords {
   static int findRootRecord(@NotNull String rootUrl) {
     return writeAndHandleErrors(() -> {
       if (ourStoreRootsSeparately) {
-        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") LineNumberReader stream =
-               new LineNumberReader(new BufferedReader(new InputStreamReader(new FileInputStream(DbConnection.myRootsFile))))) {
+        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") LineNumberReader stream = new LineNumberReader(Files.newBufferedReader(DbConnection.myRootsFile))) {
           String str;
           while((str = stream.readLine()) != null) {
             int index = str.indexOf(' ');
@@ -784,8 +747,7 @@ public final class FSRecords {
         catch (FileNotFoundException ignored) {}
 
         DbConnection.markDirty();
-        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") Writer stream =
-               new BufferedWriter(new OutputStreamWriter(new FileOutputStream(DbConnection.myRootsFile, true)))) {
+        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") Writer stream = Files.newBufferedWriter(DbConnection.myRootsFile, StandardOpenOption.APPEND)) {
           int id = createRecord();
           stream.write(id + " " + rootUrl + "\n");
           return id;
@@ -840,8 +802,7 @@ public final class FSRecords {
       DbConnection.markDirty();
       if (ourStoreRootsSeparately) {
         List<String> rootsThatLeft = new ArrayList<>();
-        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") LineNumberReader stream =
-               new LineNumberReader(new BufferedReader(new InputStreamReader(new FileInputStream(DbConnection.myRootsFile))))) {
+        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") LineNumberReader stream = new LineNumberReader(Files.newBufferedReader(DbConnection.myRootsFile))) {
           String str;
           while((str = stream.readLine()) != null) {
             int index = str.indexOf(' ');
@@ -853,9 +814,8 @@ public final class FSRecords {
         }
         catch (FileNotFoundException ignored) {}
 
-        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") Writer stream =
-               new BufferedWriter(new OutputStreamWriter(new FileOutputStream(DbConnection.myRootsFile)))) {
-          for (String line:rootsThatLeft) {
+        try (@SuppressWarnings("ImplicitDefaultCharsetUsage") Writer stream = Files.newBufferedWriter(DbConnection.myRootsFile)) {
+          for (String line : rootsThatLeft) {
             stream.write(line);
             stream.write("\n");
           }
@@ -995,9 +955,10 @@ public final class FSRecords {
     }
   }
 
-  // try to apply `childrenConvertor` to the children of `parentId`.
-  // First, try optimistically: outside write lock and commit inside write lock if nothing changed
-  // Failing that, pessimistically: retry converter inside write lock for fresh children and commit inside the same write lock
+  // Perform operation on children and save the list atomically:
+  // Obtain fresh children and try to apply `childrenConvertor` to the children of `parentId`.
+  // If everything is still valid (i.e. no one changed the list in the meantime), commit.
+  // Failing that, repeat pessimistically: retry converter inside write lock for fresh children and commit inside the same write lock
   @NotNull
   static ListResult update(int parentId, @NotNull Function<? super ListResult, ? extends ListResult> childrenConvertor) {
     assert parentId > 0: parentId;
@@ -1045,8 +1006,8 @@ public final class FSRecords {
   }
 
   private static void updateSymlinkInfoForNewChild(int parentId, @NotNull ChildInfo info) {
-    FileAttributes attributes = info.getFileAttributes();
-    if (attributes != null && attributes.isSymLink()) {
+    int attributes = info.getFileAttributeFlags();
+    if (attributes != -1 && PersistentFS.isSymLink(attributes)) {
       int id = info.getId();
       String symlinkTarget = info.getSymlinkTarget();
       storeSymlinkTarget(id, symlinkTarget);
@@ -1056,7 +1017,7 @@ public final class FSRecords {
         VirtualFile parent = PersistentFS.getInstance().findFileById(parentId);
         assert parent != null : parentId + '/' + id + ": " + name + " -> " + symlinkTarget;
         String linkPath = parent.getPath() + '/' + name;
-        ((LocalFileSystemImpl)fs).symlinkUpdated(id, parent, linkPath, symlinkTarget);
+        ((LocalFileSystemImpl)fs).symlinkUpdated(id, parent, name, linkPath, symlinkTarget);
       }
     }
   }
@@ -1087,85 +1048,10 @@ public final class FSRecords {
     }
   }
 
-  // return entries from `existingList` plus `newList',
-  // in case of name clash use id from the corresponding `existingList` entry and name from the `newList` entry (to avoid duplicating ids: preserve old id but supply new name)
-  @NotNull
-  static ListResult mergeByName(@NotNull ListResult existingList,
-                                @NotNull ListResult newList,
-                                @NotNull TObjectHashingStrategy<? super CharSequence> hashingStrategy) {
-    List<? extends ChildInfo> newChildren = newList.children;
-    List<? extends ChildInfo> oldChildren = existingList.children;
-    if (oldChildren.isEmpty()) return newList;
-    // both `newChildren` and `oldChildren` are sorted by id, but not nameId, so plain O(N) merge is not possible.
-    // instead, try to eliminate entries with the same id from both lists first (since they have same nameId), and compare the rest by (slower) nameId.
-    // typically, when `newChildren` contains 5K entries + couple absent from `oldChildren`, and `oldChildren` contains 5K+couple entries, these maps will contain a couple of entries absent from each other
-
-    // name -> index in result
-    // ObjectIntHashMap is used here to distinguish between absence and the 0th index
-    ObjectIntHashMap<CharSequence> name2I = new ObjectIntHashMap<>(Math.max(oldChildren.size(), newChildren.size()), hashingStrategy);
-
-    List<ChildInfo> result = new ArrayList<>(Math.max(oldChildren.size(), newChildren.size()));
-    for (int i = 0, j = 0; i < newChildren.size() || j < oldChildren.size(); ) {
-      ChildInfo newChild = i == newChildren.size() ? null : newChildren.get(i);
-      ChildInfo oldChild = j == oldChildren.size() ? null : oldChildren.get(j);
-      int newId = newChild == null ? Integer.MAX_VALUE : newChild.getId();
-      int oldId = oldChild == null ? Integer.MAX_VALUE : oldChild.getId();
-      if (newId == oldId) {
-        i++;
-        j++;
-        result.add(oldChild);
-      }
-      else if (newId < oldId) {
-        // newId is absent from `oldChildren`
-        CharSequence name = newChild.getName();
-        int dupI = name2I.put(name, result.size(), -1);
-        if (dupI == -1) {
-          result.add(newChild);
-        }
-        else {
-          // aha, found entry in `result` with the same name.
-          // That previous entry must come from the `oldChildren`
-          // so replace just the name (the new name must have changed its case), leave id the same
-          ChildInfo oldDup = result.get(dupI);
-          int nameId = newChild.getNameId();
-          assert nameId > 0 : newList;
-          ChildInfoImpl replaced = new ChildInfoImpl(oldDup.getId(), nameId, oldDup.getFileAttributes(), oldDup.getChildren(),
-                                                 oldDup.getSymlinkTarget());
-          result.set(dupI, replaced);
-        }
-        i++;
-      }
-      else {
-        // oldId is absent from `newChildren`
-        CharSequence name = oldChild.getName();
-        int dupI = name2I.put(name, result.size(), -1);
-        if (dupI == -1) {
-          result.add(oldChild);
-        }
-        else {
-          // aha, found entry in `result` with the same name.
-          // That previous entry must come from the `newChildren`
-          // so leave the new name (the new name must have changed its case), replace the id
-          ChildInfo dup = result.get(dupI);
-          int nameId = dup.getNameId();
-          assert nameId > 0 : existingList;
-          ChildInfoImpl replaced = new ChildInfoImpl(oldChild.getId(), nameId, dup.getFileAttributes(), dup.getChildren(),
-                                                 dup.getSymlinkTarget());
-          result.set(dupI, replaced);
-        }
-        j++;
-      }
-    }
-    return name2I.isEmpty() ? newList : new ListResult(result);
-  }
-
   static @Nullable String readSymlinkTarget(int id) {
     String result = readAndHandleErrors(() -> {
       try (DataInputStream stream = readAttribute(id, ourSymlinkTargetAttr)) {
         if (stream != null) return StringUtil.nullize(IOUtil.readUTF(stream));
-      }
-      try (DataInputStream stream = readAttribute(id, ourSymlinkTargetAttr_old)) {
-        if (stream != null) return StringUtil.nullize(stream.readUTF());
       }
       return null;
     });
@@ -1223,7 +1109,7 @@ public final class FSRecords {
   @Nullable
   static VirtualFileSystemEntry findFileById(int id, @NotNull ConcurrentIntObjectMap<VirtualFileSystemEntry> idToDirCache) {
     class ParentFinder implements ThrowableComputable<Void, Throwable> {
-      @Nullable private TIntArrayList path;
+      @Nullable private IntList path;
       private VirtualFileSystemEntry foundParent;
 
       @Override
@@ -1244,7 +1130,9 @@ public final class FSRecords {
           }
 
           currentId = parentId;
-          if (path == null) path = new TIntArrayList();
+          if (path == null) {
+            path = new IntArrayList();
+          }
           path.add(currentId);
         }
         return null;
@@ -1254,7 +1142,7 @@ public final class FSRecords {
         VirtualFileSystemEntry parent = foundParent;
         if (path != null) {
           for (int i = path.size() - 1; i >= 0; i--) {
-            parent = findChild(parent, path.get(i));
+            parent = findChild(parent, path.getInt(i));
           }
         }
 
@@ -1335,15 +1223,17 @@ public final class FSRecords {
     });
   }
 
+  @PersistentFS.Attributes
   static int getFlags(int id) {
     return readAndHandleErrors(() -> doGetFlags(id));
   }
 
+  @PersistentFS.Attributes
   private static int doGetFlags(int id) {
     return getRecordInt(id, FLAGS_OFFSET);
   }
 
-  static void setFlags(int id, int flags, final boolean markAsChange) {
+  static void setFlags(int id, @PersistentFS.Attributes int flags, final boolean markAsChange) {
     writeAndHandleErrors(() -> {
       if (markAsChange) {
         incModCount(id);
@@ -1752,7 +1642,7 @@ public final class FSRecords {
   private static int reuses;
 
   @NotNull
-  public static MessageDigest getContentHashDigest() {
+  private static MessageDigest getContentHashDigest() {
     // TODO replace with sha-256
     return DigestUtil.sha1();
   }
@@ -1956,8 +1846,8 @@ public final class FSRecords {
       return fileLength / RECORD_SIZE;
     });
 
-    IntArrayList usedAttributeRecordIds = new IntArrayList();
-    IntArrayList validAttributeIds = new IntArrayList();
+    IntList usedAttributeRecordIds = new IntArrayList();
+    IntList validAttributeIds = new IntArrayList();
     for (int id = 2; id < recordCount; id++) {
       int flags = getFlags(id);
       LOG.assertTrue((flags & ~ALL_VALID_FLAGS) == 0, "Invalid flags: 0x" + Integer.toHexString(flags) + ", id: " + id);
@@ -1976,14 +1866,14 @@ public final class FSRecords {
     LOG.info("Sanity check took " + t + " ms");
   }
 
-  private static void checkRecordSanity(final int id, final int recordCount, final IntArrayList usedAttributeRecordIds,
-                                        final IntArrayList validAttributeIds) {
+  private static void checkRecordSanity(final int id, final int recordCount, final IntList usedAttributeRecordIds,
+                                        final IntList validAttributeIds) {
     int parentId = getParent(id);
     assert parentId >= 0 && parentId < recordCount;
     if (parentId > 0 && getParent(parentId) > 0) {
       int parentFlags = getFlags(parentId);
       assert !BitUtil.isSet(parentFlags, FREE_RECORD_FLAG) : parentId + ": " + Integer.toHexString(parentFlags);
-      assert BitUtil.isSet(parentFlags, PersistentFS.IS_DIRECTORY_FLAG) : parentId + ": " + Integer.toHexString(parentFlags);
+      assert BitUtil.isSet(parentFlags, PersistentFS.Flags.IS_DIRECTORY) : parentId + ": " + Integer.toHexString(parentFlags);
     }
 
     CharSequence name = getNameSequence(id);
@@ -2006,7 +1896,7 @@ public final class FSRecords {
     }
   }
 
-  private static void checkAttributesStorageSanity(int id, IntArrayList usedAttributeRecordIds, IntArrayList validAttributeIds) {
+  private static void checkAttributesStorageSanity(int id, IntList usedAttributeRecordIds, IntList validAttributeIds) {
     int attributeRecordId = getAttributeRecordId(id);
 
     assert attributeRecordId >= 0;
@@ -2020,7 +1910,7 @@ public final class FSRecords {
     }
   }
 
-  private static void checkAttributesSanity(int attributeRecordId, IntArrayList usedAttributeRecordIds, IntArrayList validAttributeIds) throws IOException {
+  private static void checkAttributesSanity(int attributeRecordId, IntList usedAttributeRecordIds, IntList validAttributeIds) throws IOException {
     assert !usedAttributeRecordIds.contains(attributeRecordId);
     usedAttributeRecordIds.add(attributeRecordId);
 

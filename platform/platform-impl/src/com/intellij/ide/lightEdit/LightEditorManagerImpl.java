@@ -7,13 +7,17 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.editor.ex.FocusChangeListener;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.fileEditor.ex.FileEditorProviderManager;
 import com.intellij.openapi.fileEditor.impl.EditorHistoryManager;
+import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.fileTypes.PlainTextFileType;
+import com.intellij.openapi.fileTypes.UnknownFileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
@@ -49,7 +53,7 @@ public final class LightEditorManagerImpl implements LightEditorManager, Disposa
   }
 
   private @Nullable LightEditorInfo doCreateEditor(@NotNull VirtualFile file) {
-    Project project = Objects.requireNonNull(LightEditUtil.getProject());
+    Project project = LightEditUtil.requireLightEditProject(myLightEditService.getProject());
     Pair<FileEditorProvider, FileEditor> pair = createFileEditor(project, file);
     if (pair == null) {
       return null;
@@ -60,10 +64,26 @@ public final class LightEditorManagerImpl implements LightEditorManager, Disposa
     ObjectUtils.consumeIfCast(LightEditorInfoImpl.getEditor(editorInfo), EditorImpl.class,
                               editorImpl -> editorImpl.setDropHandler(new LightEditDropHandler()));
     myEditors.add(editorInfo);
+    installListener(editorInfo);
     project.getMessageBus().syncPublisher(FileEditorManagerListener.FILE_EDITOR_MANAGER).fileOpened(
       FileEditorManager.getInstance(project), file
     );
     return editorInfo;
+  }
+
+  private void installListener(@NotNull LightEditorInfo editorInfo) {
+    FileEditor fileEditor = editorInfo.getFileEditor();
+    if (fileEditor instanceof TextEditor) {
+      Editor editor = ((TextEditor)fileEditor).getEditor();
+      if (editor instanceof EditorEx) {
+        ((EditorEx)editor).addFocusListener(new FocusChangeListener() {
+          @Override
+          public void focusGained(@NotNull Editor editor) {
+            checkUpdate(editor);
+          }
+        }, this);
+      }
+    }
   }
 
   private static @Nullable Pair<FileEditorProvider, FileEditor> createFileEditor(@NotNull Project project, @NotNull VirtualFile file) {
@@ -84,8 +104,23 @@ public final class LightEditorManagerImpl implements LightEditorManager, Disposa
   public @NotNull LightEditorInfo createEmptyEditor(@Nullable String preferredName) {
     String name = preferredName != null ? preferredName : getUniqueName();
     LightVirtualFile file = new LightVirtualFile(name);
-    file.setFileType(PlainTextFileType.INSTANCE);
+    file.setFileType(getFileType(preferredName));
     return Objects.requireNonNull(doCreateEditor(file));
+  }
+
+  @NotNull
+  private static FileType getFileType(@Nullable String preferredName) {
+    if (preferredName != null) {
+      int extOffset = preferredName.lastIndexOf(".");
+      if (extOffset >= 0 && preferredName.length() > extOffset + 1) {
+        String extension = preferredName.substring(extOffset + 1);
+        FileType fileType = FileTypeManager.getInstance().getFileTypeByExtension(extension);
+        if (!(fileType instanceof UnknownFileType || fileType.isBinary())) {
+          return fileType;
+        }
+      }
+    }
+    return PlainTextFileType.INSTANCE;
   }
 
   @Override
@@ -113,6 +148,10 @@ public final class LightEditorManagerImpl implements LightEditorManager, Disposa
   public void releaseEditors() {
     myEditors.forEach(editorInfo -> ((LightEditorInfoImpl)editorInfo).disposeEditor());
     myEditors.clear();
+  }
+
+  public void closeAllEditors() {
+    myEditors.forEach(editorInfo -> closeEditor(editorInfo));
   }
 
   @Override
@@ -157,9 +196,7 @@ public final class LightEditorManagerImpl implements LightEditorManager, Disposa
 
   @Nullable
   public LightEditorInfo findOpen(@NotNull VirtualFile file) {
-    return myEditors.stream()
-      .filter(editorInfo -> file.getPath().equals(editorInfo.getFile().getPath()))
-      .findFirst().orElse(null);
+    return ContainerUtil.find(myEditors, editorInfo -> file.getPath().equals(editorInfo.getFile().getPath()));
   }
 
   @Override
@@ -186,12 +223,12 @@ public final class LightEditorManagerImpl implements LightEditorManager, Disposa
 
   @Override
   public boolean containsUnsavedDocuments() {
-    return myEditors.stream().anyMatch(editorInfo -> editorInfo.isUnsaved());
+    return myEditors.stream().anyMatch(editorInfo -> editorInfo.isSaveRequired());
   }
 
   @NotNull
   List<LightEditorInfo> getUnsavedEditors() {
-    return ContainerUtil.filter(myEditors, editorInfo -> editorInfo.isUnsaved());
+    return ContainerUtil.filter(myEditors, editorInfo -> editorInfo.isSaveRequired());
   }
 
   private String getUniqueName() {
@@ -231,6 +268,31 @@ public final class LightEditorManagerImpl implements LightEditorManager, Disposa
 
   @Nullable
   LightEditorInfo getEditorInfo(@NotNull VirtualFile file) {
-    return myEditors.stream().filter(editorInfo -> file.equals(editorInfo.getFile())).findFirst().orElse(null);
+    return ContainerUtil.find(myEditors, editorInfo -> file.equals(editorInfo.getFile()));
+  }
+
+  public void reloadFile(@NotNull VirtualFile file) {
+    LightEditorInfo editorInfo = getEditorInfo(file);
+    if (editorInfo != null) {
+      file.refresh(false, false);
+      FileDocumentManager.getInstance().reloadFiles(file);
+    }
+  }
+
+  private void checkUpdate(@NotNull Editor editor) {
+    LightEditorInfo editorInfo = findEditor(editor);
+    if (editorInfo != null && !editorInfo.isUnsaved()) {
+      reloadFile(editorInfo.getFile());
+    }
+  }
+
+  private @Nullable LightEditorInfo findEditor(@NotNull Editor editor) {
+    for (LightEditorInfo editorInfo : myEditors) {
+      FileEditor fileEditor = editorInfo.getFileEditor();
+      if (fileEditor instanceof TextEditor && editor == ((TextEditor)fileEditor).getEditor()) {
+        return editorInfo;
+      }
+    }
+    return null;
   }
 }

@@ -5,6 +5,7 @@ import com.intellij.ide.projectView.ViewSettings;
 import com.intellij.ide.projectView.impl.ModuleGroup;
 import com.intellij.ide.projectView.impl.ProjectRootsUtil;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.*;
 import com.intellij.openapi.module.impl.LoadedModuleDescriptionImpl;
 import com.intellij.openapi.project.Project;
@@ -58,18 +59,20 @@ public class ProjectViewProjectNode extends AbstractProjectNode {
 
     String baseDirPath = project.getBasePath();
     VirtualFile baseDir = baseDirPath == null ? null : LocalFileSystem.getInstance().findFileByPath(baseDirPath);
-    if (baseDir == null) {
-      return nodes;
-    }
-
-    PsiManager psiManager = PsiManager.getInstance(project);
-    VirtualFile[] files = baseDir.getChildren();
-    for (VirtualFile file : files) {
-      if (!file.isDirectory()) {
-        if (ProjectFileIndex.SERVICE.getInstance(getProject()).getModuleForFile(file, false) == null) {
-          PsiFile psiFile = psiManager.findFile(file);
-          if (psiFile != null) {
-            nodes.add(new PsiFileNode(getProject(), psiFile, getSettings()));
+    if (baseDir != null) {
+      PsiManager psiManager = PsiManager.getInstance(project);
+      VirtualFile[] files = baseDir.getChildren();
+      ProjectFileIndex projectFileIndex = null;
+      for (VirtualFile file : files) {
+        if (!file.isDirectory()) {
+          if (projectFileIndex == null) {
+            projectFileIndex = ProjectFileIndex.SERVICE.getInstance(getProject());
+          }
+          if (projectFileIndex.getModuleForFile(file, false) == null) {
+            PsiFile psiFile = psiManager.findFile(file);
+            if (psiFile != null) {
+              nodes.add(new PsiFileNode(getProject(), psiFile, getSettings()));
+            }
           }
         }
       }

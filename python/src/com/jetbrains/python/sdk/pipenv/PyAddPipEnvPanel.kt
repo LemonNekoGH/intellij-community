@@ -18,6 +18,7 @@ import com.intellij.util.PlatformUtils
 import com.intellij.util.text.nullize
 import com.intellij.util.ui.FormBuilder
 import com.jetbrains.python.PyBundle
+import com.jetbrains.python.PySdkBundle
 import com.jetbrains.python.PythonModuleTypeBase
 import com.jetbrains.python.sdk.PySdkSettings
 import com.jetbrains.python.sdk.add.PyAddNewEnvPanel
@@ -97,10 +98,15 @@ class PyAddPipEnvPanel(private val project: Project?,
 
     val builder = FormBuilder.createFormBuilder().apply {
       if (module == null && modules.size > 1) {
-        val associatedObject = if (PlatformUtils.isPyCharm()) "project" else "module"
-        addLabeledComponent(PyBundle.message("python.sdk.pipenv.associated.object", associatedObject), moduleField)
+        val associatedObjectLabel = if (PlatformUtils.isPyCharm()) {
+          PyBundle.message("python.sdk.pipenv.associated.module")
+        }
+        else {
+          PyBundle.message("python.sdk.pipenv.associated.project")
+        }
+        addLabeledComponent(associatedObjectLabel, moduleField)
       }
-      addLabeledComponent(PyBundle.message("base.interpreter"), baseSdkField)
+      addLabeledComponent(PySdkBundle.message("python.venv.base.label"), baseSdkField)
       addComponent(installPackagesCheckBox)
       addLabeledComponent(PyBundle.message("python.sdk.pipenv.executable"), pipEnvPathField)
     }

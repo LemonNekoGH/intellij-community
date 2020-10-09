@@ -43,6 +43,7 @@ import org.jetbrains.plugins.gradle.service.project.GradleProjectResolverUtil;
 import org.jetbrains.plugins.gradle.service.task.GradleTaskManager;
 import org.jetbrains.plugins.gradle.settings.GradleProjectSettings;
 import org.jetbrains.plugins.gradle.settings.GradleSettings;
+import org.jetbrains.plugins.gradle.util.GradleBundle;
 import org.jetbrains.plugins.gradle.util.GradleConstants;
 
 import java.io.File;
@@ -80,7 +81,7 @@ public class GradleProjectTaskRunner extends ProjectTaskRunner {
                                                                           "def effectiveTasks = []\n" +
                                                                           "gradle.taskGraph.addTaskExecutionListener(new TaskExecutionAdapter() {\n" +
                                                                           "    void afterExecute(Task task, TaskState state) {\n" +
-                                                                          "        if (state.didWork && task.outputs.hasOutput) {\n" +
+                                                                          "        if ((state.didWork || (state.skipped && state.skipMessage == 'FROM-CACHE')) && task.outputs.hasOutput) {\n" +
                                                                           "            effectiveTasks.add(task)\n" +
                                                                           "        }\n" +
                                                                           "    }\n" +
@@ -171,7 +172,7 @@ public class GradleProjectTaskRunner extends ProjectTaskRunner {
       else {
         projectName = projectFile.getName();
       }
-      String executionName = "Build " + projectName;
+      String executionName = GradleBundle.message("gradle.execution.name.build.project.", projectName);
       settings.setExecutionName(executionName);
       settings.setExternalProjectPath(rootProjectPath);
       settings.setTaskNames(ContainerUtil.collect(ContainerUtil.concat(cleanTasks, buildTasks).iterator()));

@@ -16,6 +16,7 @@ import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.roots.ProjectRootManager
+import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
@@ -27,6 +28,7 @@ import com.intellij.util.io.exists
 import com.intellij.util.io.sanitizeFileName
 import com.intellij.util.text.trimMiddle
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.TestOnly
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
@@ -38,7 +40,7 @@ import javax.swing.JComponent
 val Module.rootManager: ModuleRootManager
   get() = ModuleRootManager.getInstance(this)
 
-@JvmOverloads
+@JvmOverloads @NlsSafe
 fun calcRelativeToProjectPath(file: VirtualFile,
                               project: Project?,
                               includeFilePath: Boolean = true,
@@ -129,14 +131,16 @@ fun Project.guessProjectDir() : VirtualFile? {
 }
 
 /**
- * Tries to guess the main module directory
+ * Returns some directory which is located near module files.
  *
- * Please use this method only in case if no any additional information about module location
- *  eg. some contained files or etc.
+ * There is no such thing as "base directory" for a module in IntelliJ project model. A module may have multiple content roots, or not have
+ * content roots at all. The module configuration file (.iml) may be located far away from the module files or doesn't exist at all. So this
+ * method tries to suggest some directory which is related to the module but due to its heuristics nature its result shouldn't be used for
+ * real actions as is, user should be able to review and change it. For example it can be used as a default selection in a file chooser.
  */
 fun Module.guessModuleDir(): VirtualFile? {
   val contentRoots = rootManager.contentRoots.filter { it.isDirectory }
-  return contentRoots.find { it.name == name } ?: contentRoots.firstOrNull()
+  return contentRoots.find { it.name == name } ?: contentRoots.firstOrNull() ?: moduleFile?.parent
 }
 
 @JvmOverloads
@@ -180,7 +184,7 @@ fun doGetProjectFileName(presentableUrl: String?,
 }
 
 @JvmOverloads
-fun Project.getProjectCachePath(cacheDirName: String, isForceNameUse: Boolean = false, extensionWithDot: String = ""): Path {
+fun Project.getProjectCachePath(@NonNls cacheDirName: String, isForceNameUse: Boolean = false, extensionWithDot: String = ""): Path {
   return appSystemDir.resolve(cacheDirName).resolve(getProjectCacheFileName(isForceNameUse, extensionWithDot = extensionWithDot))
 }
 

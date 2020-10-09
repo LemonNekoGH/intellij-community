@@ -44,25 +44,25 @@ private val markedElementNames: Set<String>
 
 private fun addToExistingListElement(item: ExportableItem,
                                      itemToContainingListElement: MutableMap<ExportableItem, ComponentElementProperties>,
-                                     fileToItem: Map<Path, List<ExportableItem>>): Boolean {
-  val list = fileToItem[item.file]
+                                     fileToItem: Map<FileSpec, List<ExportableItem>>): Boolean {
+  val list = fileToItem[item.fileSpec]
   if (list == null || list.isEmpty()) {
     return false
   }
 
-  var file: Path? = null
+  var file: FileSpec? = null
   for (tiedItem in list) {
     if (tiedItem === item) {
       continue
     }
 
     val elementProperties = itemToContainingListElement[tiedItem]
-    if (elementProperties != null && item.file !== file) {
-      LOG.assertTrue(file == null, "Component $item serialize itself into $file and ${item.file}")
+    if (elementProperties != null && item.fileSpec !== file) {
+      LOG.assertTrue(file == null, "Component $item serialize itself into $file and ${item.fileSpec}")
       // found
       elementProperties.items.add(item)
       itemToContainingListElement[item] = elementProperties
-      file = item.file
+      file = item.fileSpec
     }
   }
   return file != null
@@ -107,10 +107,10 @@ fun chooseSettingsFile(oldPath: String?, parent: Component?, title: String, desc
   return result
 }
 
-internal class ChooseComponentsToExportDialog(fileToComponents: Map<Path, List<ExportableItem>>,
+internal class ChooseComponentsToExportDialog(fileToComponents: Map<FileSpec, List<ExportableItem>>,
                                               private val isShowFilePath: Boolean,
-                                              title: @NlsContexts.DialogTitle String,
-                                              private val description: String) : DialogWrapper(false) {
+                                              @NlsContexts.DialogTitle title: String,
+                                              @NlsContexts.Label private val description: String) : DialogWrapper(false) {
   private val chooser: ElementsChooser<ComponentElementProperties>
   private val pathPanel = FieldPanel(ConfigurationStoreBundle.message("editbox.export.settings.to"), null, { browse() }, null)
 
@@ -168,17 +168,17 @@ internal class ChooseComponentsToExportDialog(fileToComponents: Map<Path, List<E
   }
 
   override fun createLeftSideActions(): Array<Action> {
-    val selectAll = object : AbstractAction("Select &All") {
+    val selectAll = object : AbstractAction(ConfigurationStoreBundle.message("export.components.list.action.select.all")) {
       override fun actionPerformed(e: ActionEvent) {
         chooser.setAllElementsMarked(true)
       }
     }
-    val selectNone = object : AbstractAction("Select &None") {
+    val selectNone = object : AbstractAction(ConfigurationStoreBundle.message("export.components.list.action.select.none")) {
       override fun actionPerformed(e: ActionEvent) {
         chooser.setAllElementsMarked(false)
       }
     }
-    val invert = object : AbstractAction("&Invert") {
+    val invert = object : AbstractAction(ConfigurationStoreBundle.message("export.components.list.action.invert.selection")) {
       override fun actionPerformed(e: ActionEvent) {
         chooser.invertSelection()
       }
@@ -226,7 +226,7 @@ private class ComponentElementProperties : MultiStateElementsChooser.ElementProp
   val items = CollectionFactory.createSmallMemoryFootprintSet<ExportableItem>()
 
   val fileName: String
-    get() = items.first().file.fileName.toString()
+    get() = items.first().fileSpec.relativePath
 
   override fun toString(): String {
     val names = LinkedHashSet<String>()

@@ -2,9 +2,11 @@
 package com.intellij.lang;
 
 import com.intellij.diagnostic.ImplementationConflictException;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
 import com.intellij.openapi.fileTypes.LanguageFileType;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry;
@@ -118,7 +120,10 @@ public abstract class Language extends UserDataHolderBase {
 
   public static void unregisterLanguage(@NotNull Language language) {
     IElementType.unregisterElementTypes(language);
-    ReferenceProvidersRegistry.getInstance().unloadProvidersFor(language);
+    ReferenceProvidersRegistry referenceProvidersRegistry = ApplicationManager.getApplication().getServiceIfCreated(ReferenceProvidersRegistry.class);
+    if (referenceProvidersRegistry != null) {
+      referenceProvidersRegistry.unloadProvidersFor(language);
+    }
     ourRegisteredLanguages.remove(language.getClass());
     ourRegisteredIDs.remove(language.getID());
     for (String mimeType : language.getMimeTypes()) {
@@ -169,11 +174,11 @@ public abstract class Language extends UserDataHolderBase {
   }
 
   /**
-   * Returns a user-readable name of the language.
+   * Returns a user-readable name of the language (language names are not localized).
    *
    * @return the name of the language.
    */
-  public @NotNull String getID() {
+  public @NotNull @NlsSafe String getID() {
     return myID;
   }
 
@@ -207,7 +212,7 @@ public abstract class Language extends UserDataHolderBase {
     return myBaseLanguage;
   }
 
-  public @NotNull String getDisplayName() {
+  public @NotNull @NlsSafe String getDisplayName() {
     return getID();
   }
 
@@ -232,7 +237,7 @@ public abstract class Language extends UserDataHolderBase {
     return false;
   }
 
-  public final boolean isKindOf(@NotNull String anotherLanguageId) {
+  public final boolean isKindOf(@NotNull @NonNls String anotherLanguageId) {
     Language l = this;
     while (l != null) {
       if (l.getID().equals(anotherLanguageId)) return true;
@@ -245,7 +250,7 @@ public abstract class Language extends UserDataHolderBase {
     return myDialects;
   }
 
-  public static @Nullable Language findLanguageByID(String id) {
+  public static @Nullable Language findLanguageByID(@NonNls String id) {
     return id == null ? null : ourRegisteredIDs.get(id);
   }
 

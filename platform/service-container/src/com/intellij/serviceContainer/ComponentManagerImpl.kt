@@ -5,9 +5,10 @@ import com.intellij.diagnostic.LoadingState
 import com.intellij.diagnostic.PluginException
 import com.intellij.diagnostic.StartUpMeasurer
 import com.intellij.ide.plugins.*
-import com.intellij.ide.plugins.cl.PluginClassLoader
+import com.intellij.ide.plugins.cl.PluginAwareClassLoader
 import com.intellij.idea.Main
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.AccessToken
 import com.intellij.openapi.application.Application
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.*
@@ -45,6 +46,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentMap
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicReference
+import java.util.function.Consumer
 
 internal val LOG = logger<ComponentManagerImpl>()
 
@@ -122,6 +124,20 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
 
   override fun getPicoContainer(): PicoContainer = checkStateAndGetPicoContainer()
 
+  @Volatile
+  internal var componentContainerIsReadonly: String? = null
+
+  @Internal
+  fun forbidGettingServices(reason: String): AccessToken {
+    val token = object : AccessToken() {
+      override fun finish() {
+        componentContainerIsReadonly = null
+      }
+    }
+    componentContainerIsReadonly = reason
+    return token
+  }
+
   private fun checkStateAndGetPicoContainer(): DefaultPicoContainer {
     if (containerState.get() == ContainerState.DISPOSE_COMPLETED) {
       ProgressManager.checkCanceled()
@@ -132,6 +148,7 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
 
   final override fun getMessageBus(): MessageBus {
     if (containerState.get() >= ContainerState.DISPOSE_IN_PROGRESS) {
+      ProgressManager.checkCanceled()
       throw AlreadyDisposedException("Already disposed: $this")
     }
     return messageBus!!
@@ -160,7 +177,7 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
   )
 
   @Internal
-  open fun registerComponents(plugins: List<DescriptorToLoad>, listenerCallbacks: List<Runnable>?) {
+  open fun registerComponents(plugins: List<DescriptorToLoad>, listenerCallbacks: MutableList<in Runnable>?) {
     val activityNamePrefix = activityNamePrefix()
 
     val app = getApplication()
@@ -400,7 +417,6 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
     val key = serviceClass.name
     val adapter = picoContainer.getServiceAdapter(key) as? ServiceComponentAdapter
     val indicator = ProgressManager.getGlobalProgressIndicator()
-
     if (adapter != null) {
       if (createIfNeeded && containerState.get() == ContainerState.DISPOSE_COMPLETED) {
         adapter.throwAlreadyDisposedError(this, indicator)
@@ -455,10 +471,33 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
     if (result != null || !createIfNeeded) {
       return result
     }
-    else {
-      synchronized(serviceClass) {
-        return getOrCreateLightService(serviceClass, lightServices)
+
+    if (isDisposed) {
+      val error = AlreadyDisposedException("Cannot create light service ${serviceClass.name} because container is already disposed (container=$this)")
+      if (ProgressIndicatorProvider.getGlobalProgressIndicator() == null) {
+        throw error
       }
+      else {
+        throw ProcessCanceledException(error)
+      }
+    }
+
+    // assertion only for non-platform plugins
+    val classLoader = serviceClass.classLoader
+    if (classLoader is PluginAwareClassLoader && !isGettingServiceAllowedDuringPluginUnloading(classLoader.pluginDescriptor)) {
+      componentContainerIsReadonly?.let {
+        val error = AlreadyDisposedException("Cannot create light service ${serviceClass.name} because container in read-only mode (reason=$it, container=$this")
+        if (ProgressIndicatorProvider.getGlobalProgressIndicator() == null) {
+          throw error
+        }
+        else {
+          throw ProcessCanceledException(error)
+        }
+      }
+    }
+
+    synchronized(serviceClass) {
+      return getOrCreateLightService(serviceClass, lightServices)
     }
   }
 
@@ -523,7 +562,7 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
 
   protected open fun logMessageBusDelivery(topic: Topic<*>, messageName: String?, handler: Any, duration: Long) {
     val loader = handler.javaClass.classLoader
-    val pluginId = if (loader is PluginClassLoader) loader.pluginId.idString else PluginManagerCore.CORE_ID.idString
+    val pluginId = if (loader is PluginAwareClassLoader) loader.pluginId.idString else PluginManagerCore.CORE_ID.idString
     StartUpMeasurer.addPluginCost(pluginId, "MessageBus", duration)
   }
 
@@ -594,7 +633,7 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
       Disposer.register(serviceParentDisposable, result)
     }
 
-    val pluginId = (serviceClass.classLoader as? PluginClassLoader)?.pluginId
+    val pluginId = (serviceClass.classLoader as? PluginAwareClassLoader)?.pluginId
     initializeComponent(result, null, pluginId)
     StartUpMeasurer.addCompletedActivity(startTime, serviceClass, getServiceActivityCategory(this), pluginId?.idString)
     return result
@@ -752,7 +791,7 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
       val iterator = lightServices.iterator()
       while (iterator.hasNext()) {
         val entry = iterator.next()
-        if ((entry.key.classLoader as? PluginClassLoader)?.pluginId == pluginId) {
+        if ((entry.key.classLoader as? PluginAwareClassLoader)?.pluginId == pluginId) {
           val instance = entry.value
           if (instance is Disposable) {
             Disposer.dispose(instance)
@@ -840,8 +879,8 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
 
     ApplicationManager.getApplication().assertIsWriteThread()
 
-    if (!containerState.compareAndSet(ContainerState.COMPONENT_CREATED, ContainerState.DISPOSE_IN_PROGRESS) ||
-        !containerState.compareAndSet(ContainerState.PRE_INIT, ContainerState.DISPOSE_IN_PROGRESS)) {
+    if (!(containerState.compareAndSet(ContainerState.COMPONENT_CREATED, ContainerState.DISPOSE_IN_PROGRESS) ||
+          containerState.compareAndSet(ContainerState.PRE_INIT, ContainerState.DISPOSE_IN_PROGRESS))) {
       // disposed in a recommended way using ProjectManager
       return
     }
@@ -948,6 +987,16 @@ abstract class ComponentManagerImpl @JvmOverloads constructor(internal val paren
   override fun getDisposed(): Condition<*> {
     return Condition<Any?> { isDisposed }
   }
+
+  @Internal
+  fun processServices(processor: Consumer<Any>) {
+    lightServices?.values?.forEach(processor)
+    for (adapter in picoContainer.componentAdapters) {
+      if (adapter is BaseComponentAdapter) {
+        processor.accept(adapter.getInitializedInstance() ?: continue)
+      }
+    }
+  }
 }
 
 private fun createPluginExceptionIfNeeded(error: Throwable, pluginId: PluginId): RuntimeException {
@@ -986,4 +1035,8 @@ fun handleComponentError(t: Throwable, componentClassName: String?, pluginId: Pl
   else {
     throw StartupAbortedException("Fatal error initializing '$componentClassName'", t)
   }
+}
+
+internal fun isGettingServiceAllowedDuringPluginUnloading(descriptor: PluginDescriptor): Boolean {
+  return descriptor.isRequireRestart || descriptor.pluginId == PluginManagerCore.CORE_ID || descriptor.pluginId == PluginManagerCore.JAVA_PLUGIN_ID
 }

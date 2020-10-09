@@ -16,6 +16,8 @@ import com.intellij.ide.impl.ProjectUtil
 import com.intellij.ide.lightEdit.LightEditCompatible
 import com.intellij.ide.startup.impl.StartupManagerImpl
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.components.StorageScheme
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.progress.ProcessCanceledException
@@ -26,14 +28,17 @@ import com.intellij.openapi.project.ProjectBundle
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.startup.StartupManager
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame
 import com.intellij.platform.PlatformProjectOpenProcessor
+import com.intellij.project.ProjectStoreOwner
 import com.intellij.projectImport.ProjectAttachProcessor
 import com.intellij.projectImport.ProjectOpenedCallback
 import com.intellij.serviceContainer.processProjectComponents
+import com.intellij.ui.GuiUtils
 import com.intellij.ui.IdeUICustomization
 import com.intellij.util.io.delete
 import org.jetbrains.annotations.ApiStatus
@@ -80,13 +85,15 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
             projectToClose = openProjects[openProjects.size - 1]
           }
         }
-        if (checkExistingProjectOnOpen(projectToClose, options.callback, projectStoreBaseDir, this)) {
+        // this null assertion is required to overcome bug in new version of KT compiler: KT-40034
+        @Suppress("UNNECESSARY_NOT_NULL_ASSERTION")
+        if (checkExistingProjectOnOpen(projectToClose!!, options.callback, projectStoreBaseDir, this)) {
           return null
         }
       }
     }
 
-    val frameAllocator = if (app.isHeadlessEnvironment) ProjectFrameAllocator() else ProjectUiFrameAllocator(options, projectStoreBaseDir)
+    val frameAllocator = if (app.isHeadlessEnvironment) ProjectFrameAllocator(options) else ProjectUiFrameAllocator(options, projectStoreBaseDir)
     val result = runInAutoSaveDisabledMode {
       frameAllocator.run {
         activity.end()
@@ -125,8 +132,22 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
     return project
   }
 
+  override fun openProject(project: Project): Boolean {
+    val store = if (project is ProjectStoreOwner) (project as ProjectStoreOwner).componentStore else null
+    if (store != null) {
+      val projectFilePath = if (store.storageScheme == StorageScheme.DIRECTORY_BASED) store.directoryStorePath!! else store.projectFilePath
+      for (p in openProjects) {
+        if (ProjectUtil.isSameProject(projectFilePath, p)) {
+          GuiUtils.invokeLaterIfNeeded({ ProjectUtil.focusProjectWindow(p, false) }, ModalityState.NON_MODAL)
+          return false
+        }
+      }
+    }
+    return doOpenProject(project)
+  }
+
   @ApiStatus.Internal
-  internal override fun doOpenProject(project: Project): Boolean {
+  private fun doOpenProject(project: Project): Boolean {
     if (!addToOpened(project)) {
       return false
     }
@@ -156,7 +177,8 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
     val project = instantiateProject(projectFile, options)
     try {
       val template = if (options.useDefaultProjectAsTemplate) defaultProject else null
-      initProject(projectFile, project, options.isRefreshVfsNeeded, options.preloadServices, template, ProgressManager.getInstance().progressIndicator)
+      initProject(projectFile, project, options.isRefreshVfsNeeded, options.preloadServices, template,
+                  ProgressManager.getInstance().progressIndicator)
       return project
     }
     catch (t: Throwable) {
@@ -228,7 +250,8 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
     }
 
     if (options.runConfigurators && (options.isNewProject || ModuleManager.getInstance(project).modules.isEmpty())) {
-      val module = PlatformProjectOpenProcessor.runDirectoryProjectConfigurators(projectStoreBaseDir, project, options.isProjectCreatedWithWizard)
+      val module = PlatformProjectOpenProcessor.runDirectoryProjectConfigurators(projectStoreBaseDir, project,
+                                                                                 options.isProjectCreatedWithWizard)
       options.preparedToOpen?.invoke(module)
       return PrepareProjectResult(project, module)
     }
@@ -240,6 +263,7 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
   protected open fun isRunStartUpActivitiesEnabled(project: Project): Boolean = true
 }
 
+@NlsSafe
 private fun message(e: Throwable): String {
   var message = e.message ?: e.localizedMessage
   if (message != null) {
@@ -295,14 +319,14 @@ private fun checkExistingProjectOnOpen(projectToClose: Project,
 private fun openProject(project: Project, indicator: ProgressIndicator?, runStartUpActivities: Boolean) {
   val waitEdtActivity = StartUpMeasurer.startMainActivity("placing calling projectOpened on event queue")
   if (indicator != null) {
-    indicator.text = if (ApplicationManager.getApplication().isInternal) "Waiting on event queue..." else ProjectBundle.message(
-      "project.preparing.workspace")
+    indicator.text = if (ApplicationManager.getApplication().isInternal) "Waiting on event queue..."  // NON-NLS (internal mode)
+                     else ProjectBundle.message("project.preparing.workspace")
     indicator.isIndeterminate = true
   }
   ApplicationManager.getApplication().invokeAndWait {
     waitEdtActivity.end()
     if (indicator != null && ApplicationManager.getApplication().isInternal) {
-      indicator.text = "Running project opened tasks..."
+      indicator.text = "Running project opened tasks..."  // NON-NLS (internal mode)
     }
 
     ProjectManagerImpl.LOG.debug("projectOpened")

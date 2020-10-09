@@ -129,7 +129,7 @@ final class ActionUpdater {
     });
   }
 
-  private static <T> T callAction(AnAction action, String operation, Supplier<T> call) {
+  private static <T> T callAction(AnAction action, String operation, Supplier<? extends T> call) {
     if (action instanceof UpdateInBackground || ApplicationManager.getApplication().isDispatchThread()) {
       return call.get();
     }
@@ -414,6 +414,9 @@ final class ActionUpdater {
         }
 
         if (hasChildrenWithState(childGroup, checkVisible, checkEnabled, strategy, visited)) {
+          return true;
+        }
+        if (strategy.canBePerformed.test(childGroup)) {
           return true;
         }
       }
